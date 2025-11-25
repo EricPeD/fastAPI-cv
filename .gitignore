@@ -3,3 +3,4 @@ GEMINI.md
 /venv
 __pycache__/
 fastAPI-Apuntes/
+.env

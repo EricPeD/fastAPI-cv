@@ -7,8 +7,17 @@ import fitz # PyMuPDF: Biblioteca para manipulación de PDFs.
 from docx import Document # python-docx: Biblioteca para trabajar con archivos .docx.
 from PIL import Image # Pillow: Biblioteca para procesamiento de imágenes.
 import pytesseract # Wrapper de Python para el motor Tesseract OCR.
-from pydantic import BaseModel # Para definir modelos de datos y validación.
-import re # Módulo para usar expresiones regulares.
+from pydantic import BaseModel, Field
+from typing import List
+from openai import AsyncOpenAI
+import json
+import re
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# instancia OpenAI
+client = AsyncOpenAI()
 
 # Inicialización de la aplicación FastAPI.
 app = FastAPI()
@@ -18,14 +27,137 @@ app = FastAPI()
 TEMP_CV_DIR = Path("temp")
 TEMP_CV_DIR.mkdir(exist_ok=True) # Crea el directorio si no existe, evita errores si ya está.
 
-# Modelo Pydantic para estructurar la información extraída del CV.
-# Esto asegura una salida JSON consistente y validada.
+# Modelos Pydantic para estructurar la información extraída del CV.
+# Esto asegura una salida JSON consistente y validada, con campos anidados.
+
+class Experiencia(BaseModel):
+    puesto: str | None = Field(None, description="Puesto o cargo ocupado.")
+    empresa: str | None = Field(None, description="Empresa donde se trabajó.")
+    periodo: str | None = Field(None, description="Período de tiempo en el puesto (ej. '2018 - 2022').")
+    descripcion: str | None = Field(None, description="Descripción de las responsabilidades y logros.")
+
+class Educacion(BaseModel):
+    titulo: str | None = Field(None, description="Título o grado obtenido.")
+    institucion: str | None = Field(None, description="Institución educativa.")
+    periodo: str | None = Field(None, description="Período de tiempo de estudio (ej. '2014 - 2018').")
+
 class CVInfo(BaseModel):
-    name: str | None = None  # Nombre del candidato, puede ser None si no se extrae.
-    email: str | None = None # Email del candidato, puede ser None.
-    phone: str | None = None # Número de teléfono del candidato, puede ser None.
-    full_text: str | None = None # El texto completo extraído del CV, útil para depuración o análisis posterior.
-    # Se pueden añadir más campos aquí para una extracción más detallada (ej. experiencia, educación, habilidades).
+    name: str | None = Field(None, description="Nombre completo del candidato.")
+    email: str | None = Field(None, description="Correo electrónico de contacto.")
+    phone: str | None = Field(None, description="Número de teléfono de contacto.")
+    resumen: str | None = Field(None, description="Resumen profesional o perfil del candidato.")
+    experiencia: List[Experiencia] | None = Field([], description="Lista de experiencias laborales.")
+    educacion: List[Educacion] | None = Field([], description="Lista de formaciones académicas.")
+    habilidades: List[str] | None = Field([], description="Lista de habilidades técnicas o 'hard skills'.")
+    soft_skills: List[str] | None = Field([], description="Lista de habilidades blandas o 'soft skills'.")
+    full_text: str | None = Field(None, description="El texto completo extraído del CV.")
+
+async def extract_info_with_openai(text: str) -> CVInfo:
+    """
+    Utiliza la API de OpenAI para extraer información estructurada del texto de un CV.
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key or api_key == "YOUR_API_KEY":
+        raise HTTPException(
+            status_code=500,
+            detail="OpenAI API key not found or not configured. Please set the OPENAI_API_KEY environment variable."
+        )
+
+    system_prompt = """
+    Eres un asistente experto en reclutamiento y análisis de currículums.
+    Tu tarea es analizar el texto de un CV que te proporcionaré y extraer la información clave.
+    Debes devolver la información únicamente en formato JSON, siguiendo esta estructura:
+    {
+        "name": "string",
+        "email": "string",
+        "phone": "string",
+        "resumen": "string",
+        "experiencia": [{"puesto": "string", "empresa": "string", "periodo": "string", "descripcion": "string"}],
+        "educacion": [{"titulo": "string", "institucion": "string", "periodo": "string"}],
+        "habilidades": ["string"],
+        "soft_skills": ["string"]
+    }
+    El JSON debe ser completo y válido. Si no encuentras información para un campo, usa `null`.
+    """
+
+    # cv a analizar.
+    user_prompt = f"""
+    Aquí está el texto del CV. Por favor, extráelo en el formato JSON especificado.
+    Texto del CV:
+    ---
+    {text}
+    ---
+    """
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+        )
+
+        # Extrae y parsea el contenido JSON de la respuesta.
+        response_content = response.choices[0].message.content
+        extracted_data = json.loads(response_content)
+
+        # Añade el texto completo original a los datos extraídos
+        extracted_data['full_text'] = text
+
+        # Valida y crea una instancia del modelo CVInfo con los datos extraídos.
+        cv_info = CVInfo(**extracted_data)
+        return cv_info
+
+    except json.JSONDecodeError:
+        print("Error: La respuesta de OpenAI no fue un JSON válido.")
+        raise HTTPException(status_code=500, detail="OpenAI returned invalid JSON.")
+    except Exception as e:
+        print(f"An error occurred with OpenAI API: {e}")
+        raise HTTPException(status_code=500, detail=f"An error occurred with OpenAI API: {str(e)}")
+
+
+# def extract_info_from_text(text: str) -> CVInfo:
+#     """
+#     Extrae información clave (email, teléfono, nombre) del texto plano de un CV
+#     utilizando expresiones regulares.
+#     """
+#     name = None
+#     email = None
+#     phone = None
+
+#     # Expresión regular para email. Es un patrón común para correos electrónicos.
+#     email_match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
+#     if email_match:
+#         email = email_match.group(0)
+
+#     # Expresión regular para teléfono. Intenta capturar varios formatos de números de teléfono,
+#     # incluyendo códigos de país y separadores comunes. Podría necesitar refinamiento.
+#     phone_match = re.search(r"(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?(\d{3}[-.\s]?\d{4}|\d{7})", text)
+#     if phone_match:
+#         phone = phone_match.group(0)
+    
+#     # Estos campos no se extraían con regex. Se inicializan como None para el modelo.
+#     resumen = None
+#     experiencia = []
+#     educacion = []
+#     habilidades = []
+#     soft_skills = []
+
+#     return CVInfo(
+#         name=name,
+#         email=email,
+#         phone=phone,
+#         full_text=text,
+#         resumen=resumen,
+#         experiencia=experiencia,
+#         educacion=educacion,
+#         habilidades=habilidades,
+#         soft_skills=soft_skills
+#     )
+
 
 def get_mime_type(file_path: Path) -> str | None:
     """
@@ -89,35 +221,6 @@ def extract_text_from_image(image_path: Path) -> str:
         raise HTTPException(status_code=500, detail=f"Error al procesar la imagen con OCR: {e}")
     return text
 
-def extract_info_from_text(text: str) -> CVInfo:
-    """
-    Extrae información clave (email, teléfono, nombre) del texto plano de un CV
-    utilizando expresiones regulares.
-    """
-    name = None
-    email = None
-    phone = None
-
-    # Expresión regular para email. Es un patrón común para correos electrónicos.
-    email_match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
-    if email_match:
-        email = email_match.group(0)
-
-    # Expresión regular para teléfono. Intenta capturar varios formatos de números de teléfono,
-    # incluyendo códigos de país y separadores comunes. Podría necesitar refinamiento.
-    phone_match = re.search(r"(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?(\d{3}[-.\s]?\d{4}|\d{7})", text)
-    if phone_match:
-        phone = phone_match.group(0)
-    
-    # *** A MEJORAR ***
-    # La extracción del nombre es un punto débil actual.
-    # Se necesitaría una lógica más sofisticada (ej. buscar la primera línea prominente,
-    # o usar técnicas de PNL) para extraer el nombre de forma fiable.
-    # Actualmente, 'name' siempre será None.
-
-    return CVInfo(name=name, email=email, phone=phone, full_text=text)
-
-
 @app.get("/")
 async def read_root():
     """
@@ -147,7 +250,7 @@ async def upload_cv(file: UploadFile = File(...)):
 
         if not detected_mime_type:
             # Si el tipo MIME no se puede detectar (ej. extensión inusual), se informa al cliente.
-            return {"filename": filename, "status": "Uploaded, MIME type not detected. Proceed with caution.", "detected_mime_type": None}
+            raise HTTPException(status_code=400, detail="Could not determine file MIME type.")
         
         extracted_text = None
         # Despacha el procesamiento del archivo según el tipo MIME detectado.
@@ -159,29 +262,26 @@ async def upload_cv(file: UploadFile = File(...)):
             extracted_text = extract_text_from_image(file_path)
         else:
             # Maneja tipos de archivo no soportados.
-            return {"filename": filename, "detected_mime_type": detected_mime_type, "message": "Tipo de archivo no soportado aún para extracción de texto."}
-
-        # *** IMPORTANTE ***
-        # Elimina el archivo temporal del disco después de que ha sido procesado.
-        # Esto es crucial por seguridad, privacidad y gestión del espacio en disco.
-        os.remove(file_path)
+            raise HTTPException(status_code=415, detail=f"Unsupported file type: {detected_mime_type}")
         
-        if extracted_text:
-            # Extrae la información estructurada del texto plano.
-            cv_info = extract_info_from_text(extracted_text)
-            return cv_info # FastAPI serializa automáticamente el objeto CVInfo a JSON.
-        else:
+        if not extracted_text:
             # Si por alguna razón no se extrajo texto (ej. archivo vacío o error silencioso).
-            return {"filename": filename, "detected_mime_type": detected_mime_type, "message": "No se pudo extraer texto del archivo o el archivo está vacío."}
+            raise HTTPException(status_code=422, detail="Could not extract text from the file or the file is empty.")
+
+        # Extrae la información estructurada del texto plano usando OpenAI.
+        cv_info = await extract_info_with_openai(extracted_text)
+        return cv_info # FastAPI serializa automáticamente el objeto CVInfo a JSON.
 
     except HTTPException:
         # Si ya hemos levantado una HTTPException específica, la relanzamos.
         raise
     except Exception as e:
         # Captura cualquier otra excepción inesperada durante el proceso.
-        # Asegura que el archivo temporal se elimine incluso si hay un error.
+        # Registra el error y lo propaga como una excepción HTTP 500 para el cliente.
+        print(f"General error during file upload or processing: {e}")
+        raise HTTPException(status_code=500, detail=f"Error uploading or processing file: {e}")
+    finally:
+        # Este bloque se ejecuta siempre, garantizando la limpieza del archivo temporal.
+        # Es crucial por seguridad, privacidad y gestión del espacio en disco.
         if file_path and file_path.exists():
             os.remove(file_path)
-        # Registra el error y lo propaga como una excepción HTTP 500 para el cliente.
-        print(f"Error general al subir o procesar el archivo: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al subir o procesar el archivo: {e}")

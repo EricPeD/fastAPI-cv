@@ -1,0 +1,68 @@
+{
+  "name": "Juan Pérez García",
+  "email": "juan.perez.dev@email.com",
+  "phone": "+34 600 123 456",
+  "full_text": "Juan Pérez García\nDesarrollador Full Stack\nContacto\n• Teléfono: +34 600 123 456\n• Email: juan.perez.dev@email.com\n• LinkedIn: linkedin.com/in/juanperezdev\n• GitHub: github.com/juanperezdev\n• Dirección: Calle Ficticia 123, 28001 Madrid, España\nResumen Profesional\nDesarrollador Full Stack con 5 años de experiencia en el diseño, desarrollo y\ndespliegue de aplicaciones web escalables. Especializado en Python (FastAPI,\nDjango) y JavaScript (React, Node.js), con un fuerte enfoque en la calidad del\ncódigo, las metodologías ágiles y la optimización del rendimiento. Buscando un\nrol desafiante para aplicar habilidades técnicas y contribuir al éxito de proyectos\ninnovadores.\nExperiencia Laboral\nDesarrollador Full Stack Senior | Tech Solutions S.L. | Madrid, España\nFebrero 2022 – Presente * Liderazgo técnico en el desarrollo de microservicios\nRESTful con FastAPI y PostgreSQL, incrementando la eficiencia del backend en\nun 25%. * Diseño e implementación de interfaces de usuario interactivas usando\nReact y Redux. * Integración continua y despliegue (CI/CD) con Jenkins y\nDocker. * Mentorización de desarrolladores junior y revisión de código.\nDesarrollador Backend | Innovatech Corp. | Barcelona, España Marzo 2019 –\nEnero 2022 * Desarrollo de APIs REST con Django y Django REST Framework,\nmanejando una base de datos MySQL. * Optimización de consultas de base de\ndatos que redujo el tiempo de respuesta en un 30%.\n* Participación activa\nen el ciclo de vida completo del desarrollo de software, incluyendo análisis de\nrequisitos, diseño, codificación, pruebas y soporte.\nEducación\nMáster en Ingeniería Informática | Universidad Politécnica de Madrid |\nMadrid, España Septiembre 2017 – Julio 2019\n1\nGrado en Ingeniería de Software | Universidad Complutense de Madrid |\nMadrid, España Septiembre 2013 – Julio 2017\nHabilidades Técnicas\n• Lenguajes de Programación: Python, JavaScript, TypeScript, SQL,\nHTML, CSS\n• Frameworks/Librerías Backend:\nFastAPI, Django, Node.js, Ex-\npress.js\n• Frameworks/Librerías Frontend: React, Redux, Next.js, Bootstrap\n• Bases de Datos: PostgreSQL, MySQL, MongoDB, SQLite\n• Herramientas/Plataformas: Docker, Git, Jenkins, AWS, Azure, Post-\nman, Jira, Confluence\n• Metodologías: Agile, Scrum, Kanban\n• Testing: Pytest, Jest, React Testing Library\nIdiomas\n• Español: Nativo\n• Inglés: Fluido (C1)\n• Francés: Básico (A2)\n2\n",
+  "resumen": "Desarrollador Full Stack con 5 años de experiencia en el diseño, desarrollo y despliegue de aplicaciones web escalables. Especializado en Python (FastAPI, Django) y JavaScript (React, Node.js), con un fuerte enfoque en la calidad del código, las metodologías ágiles y la optimización del rendimiento. Buscando un rol desafiante para aplicar habilidades técnicas y contribuir al éxito de proyectos innovadores.",
+  "experiencia": [
+    {
+      "puesto": "Desarrollador Full Stack Senior",
+      "empresa": "Tech Solutions S.L.",
+      "periodo": "Febrero 2022 – Presente",
+      "descripcion": "Liderazgo técnico en el desarrollo de microservicios RESTful con FastAPI y PostgreSQL, incrementando la eficiencia del backend en un 25%. Diseño e implementación de interfaces de usuario interactivas usando React y Redux. Integración continua y despliegue (CI/CD) con Jenkins y Docker. Mentorización de desarrolladores junior y revisión de código."
+    },
+    {
+      "puesto": "Desarrollador Backend",
+      "empresa": "Innovatech Corp.",
+      "periodo": "Marzo 2019 – Enero 2022",
+      "descripcion": "Desarrollo de APIs REST con Django y Django REST Framework, manejando una base de datos MySQL. Optimización de consultas de base de datos que redujo el tiempo de respuesta en un 30%. Participación activa en el ciclo de vida completo del desarrollo de software, incluyendo análisis de requisitos, diseño, codificación, pruebas y soporte."
+    }
+  ],
+  "educacion": [
+    {
+      "titulo": "Máster en Ingeniería Informática",
+      "institucion": "Universidad Politécnica de Madrid",
+      "periodo": "Septiembre 2017 – Julio 2019"
+    },
+    {
+      "titulo": "Grado en Ingeniería de Software",
+      "institucion": "Universidad Complutense de Madrid",
+      "periodo": "Septiembre 2013 – Julio 2017"
+    }
+  ],
+  "habilidades": [
+    "Python",
+    "JavaScript",
+    "TypeScript",
+    "SQL",
+    "HTML",
+    "CSS",
+    "FastAPI",
+    "Django",
+    "Node.js",
+    "Express.js",
+    "React",
+    "Redux",
+    "Next.js",
+    "Bootstrap",
+    "PostgreSQL",
+    "MySQL",
+    "MongoDB",
+    "SQLite",
+    "Docker",
+    "Git",
+    "Jenkins",
+    "AWS",
+    "Azure",
+    "Postman",
+    "Jira",
+    "Confluence",
+    "Agile",
+    "Scrum",
+    "Kanban",
+    "Pytest",
+    "Jest",
+    "React Testing Library"
+  ],
+  "soft_skills": null
+}
