@@ -1,0 +1,57 @@
+from pydantic import BaseModel, Field, HttpUrl
+from typing import List
+from uuid import UUID
+
+
+class Experiencia(BaseModel):
+    puesto: str | None = Field(None, description="Puesto o cargo ocupado.")
+    empresa: str | None = Field(None, description="Empresa donde se trabajó.")
+    periodo: str | None = Field(
+        None, description="Período de tiempo en el puesto (ej. '2018 - 2022')."
+    )
+    descripcion: str | None = Field(
+        None, description="Descripción de las responsabilidades y logros."
+    )
+
+
+class Educacion(BaseModel):
+    titulo: str | None = Field(None, description="Título o grado obtenido.")
+    institucion: str | None = Field(None, description="Institución educativa.")
+    periodo: str | None = Field(
+        None, description="Período de tiempo de estudio (ej. '2014 - 2018')."
+    )
+
+
+class CVInfo(BaseModel):
+    name: str | None = Field(None, description="Nombre completo del candidato.")
+    email: str | None = Field(None, description="Correo electrónico de contacto.")
+    phone: str | None = Field(None, description="Número de teléfono de contacto.")
+    resumen: str | None = Field(
+        None, description="Resumen profesional o perfil del candidato."
+    )
+    experiencia: List[Experiencia] | None = Field(
+        [], description="Lista de experiencias laborales."
+    )
+    educacion: List[Educacion] | None = Field(
+        [], description="Lista de formaciones académicas."
+    )
+    habilidades: List[str] | None = Field(
+        [], description="Lista de habilidades técnicas o 'hard skills'."
+    )
+    soft_skills: List[str] | None = Field(
+        [], description="Lista de habilidades blandas o 'soft skills'."
+    )
+    full_text: str | None = Field(
+        None, description="El texto completo extraído del CV."
+    )
+
+
+class CallbackBody(BaseModel):
+    callback_url: HttpUrl = Field(
+        ..., description="URL a la que se enviará el resultado del procesamiento."
+    )
+
+
+class AuthActor(BaseModel):
+    user_id: str
+    key_id: UUID
