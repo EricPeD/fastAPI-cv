@@ -1,93 +1,262 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+import logging
+from fastapi import (
+    FastAPI,
+    File,
+    UploadFile,
+    HTTPException,
+    BackgroundTasks,
+    Body,
+    Depends,
+    Security,
+)
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, Field, HttpUrl
+from typing import List, Dict
 from pathlib import Path
+from openai import AsyncOpenAI
+from dotenv import load_dotenv
+from uuid import UUID, uuid4
 import os
 import shutil
 import mimetypes
-import fitz # PyMuPDF: Biblioteca para manipulación de PDFs.
-from docx import Document # python-docx: Biblioteca para trabajar con archivos .docx.
-from PIL import Image # Pillow: Biblioteca para procesamiento de imágenes.
-import pytesseract # Wrapper de Python para el motor Tesseract OCR.
-from pydantic import BaseModel, Field
-from typing import List
-from openai import AsyncOpenAI
+import fitz  # PyMuPDF
+from docx import Document  # python-docx
+from PIL import Image  # Pillow
+import pytesseract  # Tesseract OCR
 import json
-import re
-from dotenv import load_dotenv
+import httpx  # Para realizar peticiones asíncronas a la URL de callback.
+import hashlib
+import hmac
 
+
+# --- Configuración Inicial ---
 load_dotenv()
 
-# instancia OpenAI
-client = AsyncOpenAI()
+# Configuración básica del logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# Instancia de OpenAI
+try:
+    client = AsyncOpenAI()
+except Exception as e:
+    logger.error(f"Error al inicializar el cliente de OpenAI: {e}")
+    # Podrías querer que la aplicación falle al iniciar si OpenAI es crítico.
+    # exit(1)
+
+# Inicialización de Supabase
+try:
+    from supabase import create_client, Client
+
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        logger.error("Error: Supabase URL o Key no configurados en .env")
+        # Considerar elevar una excepción o salir en entornos de producción.
+        # exit(1)
+
+    supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+except ImportError:
+    logger.error(
+        "Error: La librería 'supabase' no está instalada. Por favor, ejecuta 'pip install supabase'"
+    )
+    # exit(1)
+except Exception as e:
+    logger.error(f"Error al inicializar el cliente de Supabase: {e}")
+    # exit(1)
 
 # Inicialización de la aplicación FastAPI.
-app = FastAPI()
+app = FastAPI(
+    title="API de Procesamiento de CVs",
+    description="Una API para extraer información de currículums de forma asíncrona usando IA.",
+    version="2.0.0",
+)
 
-# Directorio temporal donde se almacenarán los archivos de CV subidos.
-# Es crucial para manejar archivos de forma segura y temporal.
+# Directorio temporal para los CVs.
 TEMP_CV_DIR = Path("temp")
-TEMP_CV_DIR.mkdir(exist_ok=True) # Crea el directorio si no existe, evita errores si ya está.
+TEMP_CV_DIR.mkdir(exist_ok=True)
 
-# Modelos Pydantic para estructurar la información extraída del CV.
-# Esto asegura una salida JSON consistente y validada, con campos anidados.
+
+# --- Modelos Pydantic ---
+
 
 class Experiencia(BaseModel):
     puesto: str | None = Field(None, description="Puesto o cargo ocupado.")
     empresa: str | None = Field(None, description="Empresa donde se trabajó.")
-    periodo: str | None = Field(None, description="Período de tiempo en el puesto (ej. '2018 - 2022').")
-    descripcion: str | None = Field(None, description="Descripción de las responsabilidades y logros.")
+    periodo: str | None = Field(
+        None, description="Período de tiempo en el puesto (ej. '2018 - 2022')."
+    )
+    descripcion: str | None = Field(
+        None, description="Descripción de las responsabilidades y logros."
+    )
+
 
 class Educacion(BaseModel):
     titulo: str | None = Field(None, description="Título o grado obtenido.")
     institucion: str | None = Field(None, description="Institución educativa.")
-    periodo: str | None = Field(None, description="Período de tiempo de estudio (ej. '2014 - 2018').")
+    periodo: str | None = Field(
+        None, description="Período de tiempo de estudio (ej. '2014 - 2018')."
+    )
+
 
 class CVInfo(BaseModel):
     name: str | None = Field(None, description="Nombre completo del candidato.")
     email: str | None = Field(None, description="Correo electrónico de contacto.")
     phone: str | None = Field(None, description="Número de teléfono de contacto.")
-    resumen: str | None = Field(None, description="Resumen profesional o perfil del candidato.")
-    experiencia: List[Experiencia] | None = Field([], description="Lista de experiencias laborales.")
-    educacion: List[Educacion] | None = Field([], description="Lista de formaciones académicas.")
-    habilidades: List[str] | None = Field([], description="Lista de habilidades técnicas o 'hard skills'.")
-    soft_skills: List[str] | None = Field([], description="Lista de habilidades blandas o 'soft skills'.")
-    full_text: str | None = Field(None, description="El texto completo extraído del CV.")
+    resumen: str | None = Field(
+        None, description="Resumen profesional o perfil del candidato."
+    )
+    experiencia: List[Experiencia] | None = Field(
+        [], description="Lista de experiencias laborales."
+    )
+    educacion: List[Educacion] | None = Field(
+        [], description="Lista de formaciones académicas."
+    )
+    habilidades: List[str] | None = Field(
+        [], description="Lista de habilidades técnicas o 'hard skills'."
+    )
+    soft_skills: List[str] | None = Field(
+        [], description="Lista de habilidades blandas o 'soft skills'."
+    )
+    full_text: str | None = Field(
+        None, description="El texto completo extraído del CV."
+    )
 
-async def extract_info_with_openai(text: str) -> CVInfo:
+
+class CallbackBody(BaseModel):
+    callback_url: HttpUrl = Field(
+        ..., description="URL a la que se enviará el resultado del procesamiento."
+    )
+
+
+# --- Seguridad y Autenticación ---
+
+api_key_header_scheme = APIKeyHeader(name="Authorization", auto_error=False)
+
+
+class AuthActor(BaseModel):
+    user_id: str
+    key_id: UUID
+
+
+async def verify_api_key(
+    api_key_header: str = Security(api_key_header_scheme),
+) -> AuthActor:
     """
-    Utiliza la API de OpenAI para extraer información estructurada del texto de un CV.
+    Verifica la API Key y devuelve un objeto con el id de usuario y el id de la clave.
     """
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key == "YOUR_API_KEY":
+    if not api_key_header or not api_key_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="No se proporcionó una API Key válida en el formato 'Bearer <key>'.",
+        )
+
+    provided_key = api_key_header.split(" ")[1]
+
+    if len(provided_key) < 8:
+        raise HTTPException(status_code=401, detail="API Key con formato inválido.")
+
+    prefix = provided_key[:8]
+
+    try:
+        response = (
+            supabase_client.from_("api_keys")
+            .select("id_key, key_hash, id_user")
+            .eq("pre", prefix)
+            .execute()
+        )
+
+        if not response.data:
+            raise HTTPException(status_code=401, detail="API Key inválida.")
+
+        provided_key_hash = hashlib.sha256(provided_key.encode()).hexdigest()
+
+        for key_data in response.data:
+            stored_hash = key_data.get("key_hash")
+            if stored_hash and hmac.compare_digest(provided_key_hash, stored_hash):
+                user_id = key_data.get("id_user")
+                key_id = key_data.get("id_key")
+                if user_id and key_id:
+                    return AuthActor(user_id=user_id, key_id=key_id)
+
+        raise HTTPException(status_code=401, detail="API Key inválida.")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error durante la verificación de la API Key: {e}")
         raise HTTPException(
             status_code=500,
-            detail="OpenAI API key not found or not configured. Please set the OPENAI_API_KEY environment variable."
+            detail="Error interno del servidor al validar la API Key.",
         )
+
+
+# --- Funciones de Extracción de Texto ---
+
+
+def get_mime_type(file_path: Path) -> str | None:
+    mime_type, _ = mimetypes.guess_type(file_path.name)
+    return mime_type
+
+
+def extract_text_from_pdf(pdf_path: Path) -> str:
+    text = ""
+    try:
+        document = fitz.open(pdf_path)
+        for page in document:
+            text += page.get_text()
+        document.close()
+    except Exception as e:
+        logger.error(f"Error al extraer texto de PDF {pdf_path.name}: {e}")
+    return text
+
+
+def extract_text_from_docx(docx_path: Path) -> str:
+    text = ""
+    try:
+        document = Document(docx_path)
+        for paragraph in document.paragraphs:
+            text += paragraph.text + "\n"
+    except Exception as e:
+        logger.error(f"Error al extraer texto de DOCX {docx_path.name}: {e}")
+    return text
+
+
+def extract_text_from_image(image_path: Path) -> str:
+    text = ""
+    try:
+        text = pytesseract.image_to_string(Image.open(image_path))
+    except pytesseract.TesseractNotFoundError:
+        logger.error(
+            "Error: Tesseract OCR no está instalado o no se encuentra en el PATH."
+        )
+    except Exception as e:
+        logger.error(f"Error al extraer texto de imagen {image_path.name}: {e}")
+    return text
+
+
+async def extract_info_with_openai(text: str) -> CVInfo | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key or api_key == "YOUR_API_KEY":
+        logger.error("Error: La clave de API de OpenAI no está configurada.")
+        return None
 
     system_prompt = """
     Eres un asistente experto en reclutamiento y análisis de currículums.
     Tu tarea es analizar el texto de un CV que te proporcionaré y extraer la información clave.
     Debes devolver la información únicamente en formato JSON, siguiendo esta estructura:
     {
-        "name": "string",
-        "email": "string",
-        "phone": "string",
-        "resumen": "string",
+        "name": "string", "email": "string", "phone": "string", "resumen": "string",
         "experiencia": [{"puesto": "string", "empresa": "string", "periodo": "string", "descripcion": "string"}],
         "educacion": [{"titulo": "string", "institucion": "string", "periodo": "string"}],
-        "habilidades": ["string"],
-        "soft_skills": ["string"]
+        "habilidades": ["string"], "soft_skills": ["string"]
     }
-    El JSON debe ser completo y válido. Si no encuentras información para un campo, usa `null`.
+    Si no encuentras información para un campo, usa `null`. El JSON debe ser completo y válido.
     """
-
-    # cv a analizar.
-    user_prompt = f"""
-    Aquí está el texto del CV. Por favor, extráelo en el formato JSON especificado.
-    Texto del CV:
-    ---
-    {text}
-    ---
-    """
+    user_prompt = f"Analiza el siguiente texto de CV y extráelo en el formato JSON especificado:\n---\n{text}\n---"
 
     try:
         response = await client.chat.completions.create(
@@ -99,189 +268,249 @@ async def extract_info_with_openai(text: str) -> CVInfo:
             ],
             temperature=0.2,
         )
-
-        # Extrae y parsea el contenido JSON de la respuesta.
         response_content = response.choices[0].message.content
         extracted_data = json.loads(response_content)
-
-        # Añade el texto completo original a los datos extraídos
-        extracted_data['full_text'] = text
-
-        # Valida y crea una instancia del modelo CVInfo con los datos extraídos.
-        cv_info = CVInfo(**extracted_data)
-        return cv_info
-
-    except json.JSONDecodeError:
-        print("Error: La respuesta de OpenAI no fue un JSON válido.")
-        raise HTTPException(status_code=500, detail="OpenAI returned invalid JSON.")
+        extracted_data["full_text"] = text
+        return CVInfo(**extracted_data)
     except Exception as e:
-        print(f"An error occurred with OpenAI API: {e}")
-        raise HTTPException(status_code=500, detail=f"An error occurred with OpenAI API: {str(e)}")
+        logger.exception(f"Error en la API de OpenAI: {e}")
+        return None
 
 
-# def extract_info_from_text(text: str) -> CVInfo:
-#     """
-#     Extrae información clave (email, teléfono, nombre) del texto plano de un CV
-#     utilizando expresiones regulares.
-#     """
-#     name = None
-#     email = None
-#     phone = None
-
-#     # Expresión regular para email. Es un patrón común para correos electrónicos.
-#     email_match = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
-#     if email_match:
-#         email = email_match.group(0)
-
-#     # Expresión regular para teléfono. Intenta capturar varios formatos de números de teléfono,
-#     # incluyendo códigos de país y separadores comunes. Podría necesitar refinamiento.
-#     phone_match = re.search(r"(\+?\d{1,3}[-.\s]?)?(\(?\d{3}\)?[-.\s]?)?(\d{3}[-.\s]?\d{4}|\d{7})", text)
-#     if phone_match:
-#         phone = phone_match.group(0)
-    
-#     # Estos campos no se extraían con regex. Se inicializan como None para el modelo.
-#     resumen = None
-#     experiencia = []
-#     educacion = []
-#     habilidades = []
-#     soft_skills = []
-
-#     return CVInfo(
-#         name=name,
-#         email=email,
-#         phone=phone,
-#         full_text=text,
-#         resumen=resumen,
-#         experiencia=experiencia,
-#         educacion=educacion,
-#         habilidades=habilidades,
-#         soft_skills=soft_skills
-#     )
+# --- BackgroundTasks ---
 
 
-def get_mime_type(file_path: Path) -> str | None:
+async def process_cv_and_callback(id_request: UUID, file_path: Path):
     """
-    Intenta obtener el tipo MIME (ej. 'application/pdf', 'image/jpeg') de un archivo
-    basándose en su extensión. Es un paso fundamental para despachar el archivo
-    al procesador correcto.
+    Tarea que se ejecuta en segundo plano.
+    1. Recupera la información de la petición desde la BBDD.
+    2. Procesa el CV (extracción de texto + OpenAI).
+    3. Actualiza el estado de la petición en la tabla `requests`.
+    4. Guarda el resultado detallado en la tabla `request_logs`.
+    5. Envía el resultado final a la URL de callback.
     """
-    mime_type, _ = mimetypes.guess_type(file_path.name)
-    return mime_type
+    # Inicializar variables para el bloque finally
+    endpoint_info = None
+    payload_out = None
+    error_message = None
 
-def extract_text_from_pdf(pdf_path: Path) -> str:
-    """
-    Extrae todo el texto de un archivo PDF utilizando PyMuPDF.
-    PyMuPDF es muy eficiente ya que los PDFs a menudo contienen el texto como datos incrustados.
-    """
-    text = ""
     try:
-        document = fitz.open(pdf_path) # Abre el documento PDF.
-        for page_num in range(len(document)): # Itera sobre cada página.
-            page = document.load_page(page_num)
-            text += page.get_text() # Extrae el texto de la página y lo concatena.
-        document.close() # Cierra el documento para liberar recursos.
-    except Exception as e:
-        # Registra el error y lo propaga como una excepción HTTP 500 para el cliente.
-        print(f"Error al extraer texto de PDF {pdf_path}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al procesar el PDF: {e}")
-    return text
+        logger.info(f"Iniciando procesamiento de CV para la petición: {id_request}")
+        # 1. Obtener datos de la petición y del endpoint asociado
+        req_response = (
+            supabase_client.from_("requests")
+            .select("*, endpoints(info)")
+            .eq("id_request", str(id_request))
+            .single()
+            .execute()
+        )
+        if not req_response.data:
+            raise ValueError(f"No se encontró la petición con id {id_request}")
 
-def extract_text_from_docx(docx_path: Path) -> str:
-    """
-    Extrae todo el texto de un archivo DOCX utilizando la librería python-docx.
-    Recorre los párrafos del documento para obtener su contenido textual.
-    """
-    text = ""
-    try:
-        document = Document(docx_path) # Abre el documento DOCX.
-        for paragraph in document.paragraphs: # Itera sobre cada párrafo.
-            text += paragraph.text + "\n" # Concatena el texto del párrafo con un salto de línea.
-    except Exception as e:
-        # Registra el error y lo propaga como una excepción HTTP 500.
-        print(f"Error al extraer texto de DOCX {docx_path}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al procesar el DOCX: {e}")
-    return text
+        request_data = req_response.data
+        endpoint_info = request_data.get("endpoints", {}).get("info", {})
+        callback_url = endpoint_info.get("callbackURL")
 
-def extract_text_from_image(image_path: Path) -> str:
-    """
-    Extrae texto de un archivo de imagen (JPG, PNG, etc.) utilizando Tesseract OCR.
-    La precisión depende en gran medida de la calidad de la imagen y la configuración de Tesseract.
-    """
-    text = ""
-    try:
-        img = Image.open(image_path) # Abre la imagen con Pillow.
-        # Aplica OCR a la imagen. Se podría mejorar la precisión especificando el idioma, ej: pytesseract.image_to_string(img, lang='spa').
-        text = pytesseract.image_to_string(img) 
-    except pytesseract.TesseractNotFoundError:
-        # Excepción específica si Tesseract OCR no está instalado o su ruta no está configurada correctamente.
-        raise HTTPException(status_code=500, detail="Tesseract OCR no está instalado o no se encuentra en el PATH. Por favor, instálalo.")
-    except Exception as e:
-        # Registra otros errores durante el procesamiento de la imagen con OCR.
-        print(f"Error al extraer texto de imagen {image_path}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al procesar la imagen con OCR: {e}")
-    return text
+        if not callback_url:
+            raise ValueError(
+                f"No se encontró callbackURL en la configuración del endpoint para la petición {id_request}"
+            )
+        logger.info(
+            f"Petición {id_request} y endpoint {request_data.get('endpoint_id')} encontrados. Callback URL: {callback_url}"
+        )
 
-@app.get("/")
-async def read_root():
-    """
-    Endpoint de prueba básico para verificar que la API está funcionando.
-    """
-    return {"message": "Hello World!"}
-
-@app.post("/cv")
-async def upload_cv(file: UploadFile = File(...)):
-    """
-    Endpoint principal para subir un archivo de CV, procesarlo y extraer información.
-    Soporta PDF, DOCX y varios formatos de imagen.
-    """
-    file_path = None # Inicializa file_path fuera del try para asegurar que esté disponible en el finally/except.
-    try:
-        # Sanitiza el nombre del archivo para prevenir ataques de 'path traversal',
-        # asegurando que solo se use el nombre base del archivo.
-        filename = Path(file.filename).name
-        file_path = TEMP_CV_DIR / filename
-
-        # Guarda el archivo subido en el directorio temporal.
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        # Detecta el tipo MIME del archivo para decidir cómo procesarlo.
-        detected_mime_type = get_mime_type(file_path)
-
-        if not detected_mime_type:
-            # Si el tipo MIME no se puede detectar (ej. extensión inusual), se informa al cliente.
-            raise HTTPException(status_code=400, detail="Could not determine file MIME type.")
-        
-        extracted_text = None
-        # Despacha el procesamiento del archivo según el tipo MIME detectado.
-        if detected_mime_type == "application/pdf":
+        # 2. Procesar el archivo
+        mime_type = get_mime_type(file_path)
+        logger.info(f"Procesando archivo {file_path.name} con tipo MIME: {mime_type}")
+        extracted_text = ""
+        if mime_type == "application/pdf":
             extracted_text = extract_text_from_pdf(file_path)
-        elif detected_mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        elif (
+            mime_type
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ):
             extracted_text = extract_text_from_docx(file_path)
-        elif detected_mime_type.startswith("image/"): # Procesa cualquier tipo de imagen (jpeg, png, etc.).
+        elif mime_type and mime_type.startswith("image/"):
             extracted_text = extract_text_from_image(file_path)
         else:
-            # Maneja tipos de archivo no soportados.
-            raise HTTPException(status_code=415, detail=f"Unsupported file type: {detected_mime_type}")
-        
-        if not extracted_text:
-            # Si por alguna razón no se extrajo texto (ej. archivo vacío o error silencioso).
-            raise HTTPException(status_code=422, detail="Could not extract text from the file or the file is empty.")
+            raise ValueError(f"Tipo de archivo no soportado: {mime_type}")
 
-        # Extrae la información estructurada del texto plano usando OpenAI.
+        if not extracted_text:
+            raise ValueError("No se pudo extraer texto del archivo o está vacío.")
+        logger.info(
+            f"Texto extraído del CV para la petición {id_request}. Longitud: {len(extracted_text)}"
+        )
+
         cv_info = await extract_info_with_openai(extracted_text)
-        return cv_info # FastAPI serializa automáticamente el objeto CVInfo a JSON.
+        if not cv_info:
+            raise ValueError("Fallo en la extracción de información con OpenAI.")
+        logger.info(
+            f"Información de CV extraída con éxito para la petición {id_request}."
+        )
+
+        # 3. Preparar resultados
+        status = "completed"
+        payload_out = {"status": status, "data": cv_info.model_dump()}
+
+    except Exception as e:
+        status = "failed"
+        error_message = str(e)
+        payload_out = {"status": status, "error": error_message, "data": None}
+        logger.exception(
+            f"Fallo en el procesamiento para la petición {id_request}: {e}"
+        )
+
+    finally:
+        # 4. Actualizar estado en la tabla 'requests'
+        try:
+            await supabase_client.from_("requests").update({"status": status}).eq(
+                "id_request", str(id_request)
+            ).execute()
+            logger.info(f"Estado de la petición {id_request} actualizado a '{status}'.")
+        except Exception as e:
+            logger.exception(
+                f"Error al actualizar el estado de la petición {id_request}: {e}"
+            )
+
+        # 5. Insertar log en la tabla 'request_logs'
+        try:
+            log_entry = {
+                "id_request": str(id_request),
+                "payload_out": payload_out,
+                "error": error_message,
+            }
+            await supabase_client.from_("request_logs").insert(log_entry).execute()
+            logger.info(f"Log insertado para la petición {id_request}.")
+        except Exception as e:
+            logger.exception(
+                f"Error al insertar el log para la petición {id_request}: {e}"
+            )
+
+        # 6. Enviar notificación al callback
+        if endpoint_info and (callback_url := endpoint_info.get("callbackURL")):
+            async with httpx.AsyncClient() as async_client:
+                try:
+                    await async_client.post(
+                        callback_url, json=payload_out, timeout=30.0
+                    )
+                    logger.info(
+                        f"Resultado enviado al callback {callback_url} para la petición {id_request}."
+                    )
+                except httpx.RequestError as e:
+                    logger.exception(
+                        f"Error al enviar el resultado al callback para la petición {id_request} a {callback_url}: {e}"
+                    )
+        else:
+            logger.warning(
+                f"No se pudo enviar el callback para la petición {id_request}: No se encontró callbackURL."
+            )
+
+        # 7. Limpiar archivo temporal
+        if file_path.exists():
+            try:
+                os.remove(file_path)
+                logger.info(f"Archivo temporal {file_path.name} eliminado.")
+            except Exception as e:
+                logger.exception(
+                    f"Error al eliminar el archivo temporal {file_path.name}: {e}"
+                )
+
+
+# --- Endpoints de la API ---
+
+
+@app.get("/", summary="Endpoint de Bienvenida")
+async def read_root():
+    """Devuelve un mensaje de bienvenida para verificar que la API está activa."""
+    logger.info("Solicitud recibida en el endpoint de bienvenida.")
+    return {"message": "Bienvenido a la API de Procesamiento de CVs"}
+
+
+@app.post("/cv/{endpoint_id}", status_code=202, summary="Subir CV")
+async def upload_cv(
+    endpoint_id: UUID,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    actor: AuthActor = Depends(verify_api_key),
+):
+    """
+    Acepta un archivo de CV para procesamiento asíncrono.
+    - Requiere una API Key válida en el header `Authorization: Bearer <key>`.
+    - El `endpoint_id` debe corresponder a una configuración creada por el usuario.
+    - La API responde inmediatamente y envía el resultado al webhook configurado.
+    """
+    try:
+        logger.info(
+            f"Solicitud de subida de CV recibida para el endpoint {endpoint_id} por el usuario {actor.user_id}."
+        )
+        # 1. Validar que el endpoint existe y pertenece al usuario autenticado
+        endpoint_response = (
+            await supabase_client.from_("endpoints")
+            .select("id_user, info")
+            .eq("id", str(endpoint_id))
+            .single()
+            .execute()
+        )
+
+        if not endpoint_response.data:
+            logger.warning(
+                f"Endpoint con id '{endpoint_id}' no encontrado para el usuario {actor.user_id}."
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=f"Endpoint con id '{endpoint_id}' no encontrado.",
+            )
+
+        endpoint_data = endpoint_response.data
+        if endpoint_data.get("id_user") != actor.user_id:
+            logger.warning(
+                f"Usuario {actor.user_id} intentó usar endpoint {endpoint_id} que pertenece a {endpoint_data.get('id_user')}."
+            )
+            raise HTTPException(
+                status_code=403, detail="No tienes permiso para usar este endpoint."
+            )
+
+        # 2. Crear un registro de la petición en la base de datos
+        request_payload = {
+            "id_user": actor.user_id,
+            "id_key": str(actor.key_id),
+            "endpoint_id": str(endpoint_id),
+            "status": "processing",  # Estado inicial mientras se guarda el archivo
+        }
+        request_response = (
+            await supabase_client.from_("requests").insert(request_payload).execute()
+        )
+        id_request = request_response.data[0]["id_request"]
+        logger.info(f"Petición {id_request} registrada en la base de datos.")
+
+        # 3. Guardar el archivo en disco
+        filename = Path(file.filename).name.strip()
+        unique_filename = f"{uuid4()}_{filename}"
+        file_path = TEMP_CV_DIR / unique_filename
+
+        with file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        logger.info(
+            f"Archivo '{filename}' guardado temporalmente como '{unique_filename}' para la petición {id_request}."
+        )
+
+        # 4. Añadir la tarea de procesamiento al segundo plano
+        background_tasks.add_task(process_cv_and_callback, id_request, file_path)
+        logger.info(
+            f"Tarea de procesamiento para la petición {id_request} añadida a BackgroundTasks."
+        )
+
+        return {
+            "message": "Archivo recibido. El procesamiento ha comenzado.",
+            "request_id": id_request,
+        }
 
     except HTTPException:
-        # Si ya hemos levantado una HTTPException específica, la relanzamos.
         raise
     except Exception as e:
-        # Captura cualquier otra excepción inesperada durante el proceso.
-        # Registra el error y lo propaga como una excepción HTTP 500 para el cliente.
-        print(f"General error during file upload or processing: {e}")
-        raise HTTPException(status_code=500, detail=f"Error uploading or processing file: {e}")
-    finally:
-        # Este bloque se ejecuta siempre, garantizando la limpieza del archivo temporal.
-        # Es crucial por seguridad, privacidad y gestión del espacio en disco.
-        if file_path and file_path.exists():
-            os.remove(file_path)
+        logger.exception(
+            f"Error durante el manejo inicial del archivo o la petición para el endpoint {endpoint_id} por el usuario {actor.user_id}: {e}"
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Error al guardar el archivo para procesar: {e}"
+        )

@@ -4,3 +4,9 @@ GEMINI.md
 __pycache__/
 fastAPI-Apuntes/
 .env
+pytest.ini
+.pytest_cache
+.ruff_cache
+commit_message.txt
+tests/GEMINI.md
+tests/test_main.py

@@ -1,28 +1,34 @@
-# fastAPI-cv: Extractor de Información de CVs
+# fastAPI-cv: Asynchronous CV Processing API with AI
 
-`fastAPI-cv` es una API RESTful construida con Python y FastAPI, diseñada para procesar archivos de Currículum Vitae (CV) y extraer información clave de ellos. La API soporta múltiples formatos de archivo y devuelve los datos extraídos en un formato JSON estructurado.
+`fastAPI-cv` is a high-performance, asynchronous API built with Python and FastAPI. It leverages an AI model (OpenAI's GPT) to intelligently extract structured information from multiple CV file formats (`.pdf`, `.docx`, `.png`, `.jpg`).
 
-Este proyecto sirve como una herramienta base para automatizar el procesamiento inicial de CVs.
+The API is designed for modern development workflows, featuring a webhook-based system. Instead of waiting for processing, you submit a CV and receive an immediate acknowledgment. The heavy lifting is done in the background, and the final JSON result is sent to your specified callback URL.
 
-## Características Principales
+## Arquitectura Asíncrona
 
-*   **Endpoint de Subida de Archivos**: Un endpoint `POST /cv` que acepta archivos de CV.
-*   **Soporte Multi-formato**: Capacidad para procesar los formatos más comunes:
-    *   `PDF (.pdf)`
-    *   `Microsoft Word (.docx)`
-    *   `Imágenes (.png, .jpg, etc.)` - Utiliza Tesseract para OCR.
-*   **Extracción de Información Básica**: Extrae datos como email y número de teléfono utilizando expresiones regulares.
-*   **Respuesta Estructurada**: Devuelve la información en un formato JSON limpio y predecible gracias a los modelos de Pydantic.
-*   **Documentación Automática**: Interfaz de Swagger UI disponible en `/docs` para probar la API de forma interactiva.
+The core of this project is its non-blocking architecture:
+1.  **Authentication**: A client makes a request to a user-specific endpoint (`/cv/{endpoint_id}`), authenticating with a `Bearer` token.
+2.  **Immediate Response**: The API validates the request, saves the file, and immediately responds with a `202 Accepted` status and a `request_id`.
+3.  **Background Processing**: A background task is created to handle the CV processing:
+    *   **Text Extraction**: Extracts raw text from the file (using OCR for images).
+    *   **AI Analysis**: Sends the text to an OpenAI model (gpt-4o-mini) to extract information like name, contact info, experience, and skills, based on a structured Pydantic model.
+    *   **Database Logging**: The entire process, including the final result or any errors, is logged to a Supabase database.
+4.  **Webhook Notification**: Once processing is complete (either successfully or with an error), the API sends a `POST` request with the JSON-formatted results to the callback URL associated with the `endpoint_id`.
 
-## Pila Tecnológica
+This design ensures that the client application remains responsive and is ideal for integrating into larger, event-driven systems.
+
+## Tech-Stack
 
 *   **Backend**: [FastAPI](https://fastapi.tiangolo.com/)
 *   **Servidor ASGI**: [Uvicorn](https://www.uvicorn.org/)
-*   **Procesamiento de PDF**: [PyMuPDF](https://pymupdf.readthedocs.io/en/latest/)
-*   **Procesamiento de DOCX**: [python-docx](https://python-docx.readthedocs.io/en/latest/)
-*   **Procesamiento de Imágenes (OCR)**: [Pillow](https://python-pillow.org/) y [Pytesseract](https://pypi.org/project/pytesseract/)
-*   **Validación de Datos**: [Pydantic](https://docs.pydantic.dev/)
+*   **AI-Powered Extraction**: [OpenAI GPT-4o-mini](https://openai.com/)
+*   **Database**: [Supabase](https://supabase.io/) (PostgreSQL)
+*   **Asynchronous HTTP Client**: [HTTPX](https://www.python-httpx.org/) (for sending webhooks)
+*   **Data Validation**: [Pydantic](https://docs.pydantic.dev/)
+*   **File Processing**:
+    *   PDF: [PyMuPDF](https://pymupdf.readthedocs.io/en/latest/)
+    *   DOCX: [python-docx](https://python-docx.readthedocs.io/en/latest/)
+    *   Imágenes (OCR): [Pillow](https://python-pillow.org/) & [Pytesseract](https://pypi.org/project/pytesseract/)
 
 ---
 
@@ -30,11 +36,13 @@ Este proyecto sirve como una herramienta base para automatizar el procesamiento 
 
 ### 1. Prerrequisitos
 
-*   **Python 3.8+**
-*   **Tesseract OCR Engine**: Necesario para procesar CVs en formato de imagen.
+*   **Python 3.9+**
+*   **Tesseract OCR Engine**: Required for processing CVs in image formats.
     *   **Ubuntu/Debian**: `sudo apt update && sudo apt install tesseract-ocr`
     *   **macOS (Homebrew)**: `brew install tesseract`
-    *   **Windows**: Descargar desde [Tesseract at UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki).
+    *   **Windows**: Download from [Tesseract at UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki).
+*   **Supabase Project**: A configured Supabase project with the required database schema (see `fastAPI-Apuntes/4_Data_Model_and_Auth.md`).
+*   **OpenAI API Key**: An API key from OpenAI.
 
 ### 2. Instalación
 
@@ -48,12 +56,21 @@ Este proyecto sirve como una herramienta base para automatizar el procesamiento 
     ```bash
     python3 -m venv venv
     source venv/bin/activate
-    # En Windows usa `venv\Scripts\activate.bat`
+    # En Windows, usa: venv\Scripts\activate
     ```
 
 3.  **Instala las dependencias:**
     ```bash
     pip install -r requirements.txt
+    ```
+
+4.  **Configura las variables de entorno:**
+    Crea un archivo `.env` en la raíz del proyecto y añade las siguientes claves. Puedes usar el `.env.example` como plantilla:
+    ```env
+    # .env
+    OPENAI_API_KEY="sk-..."
+    SUPABASE_URL="https://<your-project-ref>.supabase.co"
+    SUPABASE_KEY="your-supabase-anon-key"
     ```
 
 ### 3. Ejecución
@@ -65,51 +82,4 @@ Este proyecto sirve como una herramienta base para automatizar el procesamiento 
     La API estará disponible en `http://127.0.0.1:8000`.
 
 2.  **Prueba la API:**
-    Abre tu navegador y ve a `http://127.0.0.1:8000/docs` para acceder a la interfaz de Swagger UI. Desde allí, puedes probar el endpoint `POST /cv` subiendo un archivo de CV.
-
----
-
-## Roadmap del Proyecto
-
-# Roadmap del Proyecto fastAPI-cv
-
-Este documento describe el plan de desarrollo y los objetivos para el proyecto `fastAPI-cv`.
-
-## Fase 1: MVP y Estructura Base (Completada)
-
-*   **Objetivo Cumplido**: Se estableció el entorno de desarrollo, se creó la estructura básica de la API y se implementó un flujo funcional de subida, procesamiento y extracción básica de archivos PDF, DOCX e imágenes. Se organizó la documentación del proyecto.
-*   **Tareas Realizadas**:
-    *   [X] Configurar el proyecto FastAPI (`main.py`, `requirements.txt`).
-    *   [X] Implementar endpoint `POST /cv` para subida de archivos.
-    *   [X] Añadir lógica para procesar PDF, DOCX e Imágenes (OCR).
-    *   [X] Implementar extracción básica de email y teléfono con expresiones regulares.
-    *   [X] Estructurar la salida en un modelo Pydantic.
-    *   [X] Realizar pruebas iniciales manuales y documentar los resultados.
-    *   [X] Reorganizar y consolidar toda la documentación del proyecto.
-
-## Fase 2: Mejora de la Extracción de Datos (Fase Actual)
-
-*   **Objetivo**: Aumentar la cantidad y la precisión de la información extraída de los CVs, abordando los puntos débiles identificados en el MVP.
-*   **Tareas Prioritarias**:
-    *   [ ] **Implementar Extracción de Nombre:** Desarrollar una heurística o lógica más robusta para identificar y extraer de forma fiable el nombre del candidato.
-    *   [ ] **Mejorar Robustez de Regex**: Ajustar las expresiones regulares para `phone` y `email` para que sean más tolerantes a errores de OCR y formatos variados.
-    *   [ ] **Mejorar Precisión de OCR:** Añadir configuración de idioma (`lang='spa'`) a `pytesseract` para mejorar el reconocimiento en CVs en español.
-    *   [ ] **Identificar Secciones del CV:** Desarrollar una lógica para identificar y aislar secciones clave como "Experiencia Laboral", "Educación" y "Habilidades".
-    *   [ ] **Extracción de Habilidades (Skills)**: Una vez identificada la sección, implementar una función para extraer la lista de habilidades.
-
-## Fase 3: Pruebas y Robustez (Próximos Pasos)
-
-*   **Objetivo**: Crear un sistema de pruebas automatizadas que garantice la fiabilidad del código y prevenga regresiones.
-*   **Tareas**:
-    *   [ ] **Configurar Pytest**: Integrar el framework `pytest` en el proyecto.
-    *   [ ] **Crear Tests Unitarios para Extractores**: Escribir pruebas específicas para las funciones `extract_text_from_*` y `extract_info_from_text` usando los CVs de muestra.
-    *   [ ] **Crear Tests de Integración para Endpoints**: Escribir pruebas que simulen la subida de archivos al endpoint `/cv` y verifiquen que la respuesta JSON sea la esperada.
-    *   [ ] **Añadir Manejo de Errores Específicos**: Refinar el manejo de excepciones para dar mensajes de error más útiles (ej. PDF corrupto, imagen de muy baja calidad, etc.).
-
-## Fase 4: Despliegue y Mantenimiento (Futuro)
-
-*   **Objetivo**: Preparar la API para un entorno de producción.
-*   **Tareas**:
-    *   [ ] Contenerización (Docker).
-    *   [ ] Configuración de CI/CD (ej. GitHub Actions).
-    *   [ ] Implementar un sistema de logging robusto (en lugar de `print`).
+    Abre tu navegador y ve a `http://127.0.0.1:8000/docs` para acceder a la interfaz de Swagger UI. Desde allí, puedes probar los endpoints. Recuerda que para el endpoint de subida de CVs, necesitarás una API Key y un Endpoint ID válidos, que se gestionan a través de tu instancia de Supabase.

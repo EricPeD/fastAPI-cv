@@ -1,0 +1,47 @@
+{
+  "name": "Juan Pérez Garcia",
+  "email": "juan.perez.dev@Qemail.com",
+  "phone": "+34 600 123 456",
+  "resumen": "Desarrollador Full Stack con 5 anos de experiencia en el diseno, desarrollo y despliegue de aplicaciones web escalables. Especializado en Python (FastAPI, Django) y JavaScript (React, Node.js), con un fuerte enfoque en la calidad del cédigo, las metodologias Agiles y la optimizacién del rendimiento. Buscando un rol desafiante para aplicar habilidades técnicas y contribuir al éxito de proyectos innovadores.",
+  "experiencia": [
+    {
+      "puesto": "Desarrollador Full Stack Senior",
+      "empresa": "Tech Solutions S.L.",
+      "periodo": "Febrero 2022 - Presente",
+      "descripcion": "Liderazgo técnico en el desarrollo de microservicios RESTful con FastAPI y PostgreSQL, incrementando la eficiencia del backend en un 25%. Disefio e implementacién de interfaces de usuario interactivas usando React y Redux. Integracién continua y despliegue (CI/CD) con Jenkins y Docker. Mentorizacién de desarrolladores junior y revisién de cdédigo."
+    },
+    {
+      "puesto": "Desarrollador Backend",
+      "empresa": "Innovatech Corp.",
+      "periodo": "Marzo 2019 — Enero 2022",
+      "descripcion": "Desarrollo de APIs REST con Django y Django REST Framework, manejando una base de datos MySQL. Optimizacién de consultas de base de datos que redujo el tiempo de respuesta en un 30%. Participacién activa en el ciclo de vida completo del desarrollo de software, incluyendo andlisis de requisitos, diseno, codificacién, pruebas y soporte."
+    }
+  ],
+  "educacion": [
+    {
+      "titulo": "Master en Ingenieria Informatica",
+      "institucion": "Universidad Politécnica de Madrid",
+      "periodo": "Septiembre 2017 — Julio 2019"
+    }
+  ],
+  "habilidades": [
+    "Python",
+    "FastAPI",
+    "Django",
+    "JavaScript",
+    "React",
+    "Node.js",
+    "PostgreSQL",
+    "MySQL",
+    "Jenkins",
+    "Docker"
+  ],
+  "soft_skills": [
+    "Liderazgo",
+    "Mentoría",
+    "Trabajo en equipo",
+    "Enfoque en la calidad",
+    "Metodologías ágiles"
+  ],
+  "full_text": "Juan Pérez Garcia\n\nDesarrollador Full Stack\n\nContacto\n\ne Teléfono: +34 600 123 456\n\ne Email: juan.perez.dev@Qemail.com\n\ne LinkedIn: linkedin.com/in/juanperezdev\n\n¢ GitHub: github.com/juanperezdev\n\ne Direccién: Calle Ficticia 123, 28001 Madrid, Espana\n\nResumen Profesional\n\nDesarrollador Full Stack con 5 anos de experiencia en el diseno, desarrollo y\ndespliegue de aplicaciones web escalables. Especializado en Python (FastAPI,\nDjango) y JavaScript (React, Node.js), con un fuerte enfoque en la calidad del\ncédigo, las metodologias Agiles y la optimizacién del rendimiento. Buscando un\nrol desafiante para aplicar habilidades técnicas y contribuir al éxito de proyectos\ninnovadores.\n\nExperiencia Laboral\n\nDesarrollador Full Stack Senior | Tech Solutions S.L. | Madrid, Espafia\nFebrero 2022 - Presente * Liderazgo técnico en el desarrollo de microservicios\nRESTful con FastAPI y PostgreSQL, incrementando la eficiencia del backend en\nun 25%. * Disefio e implementacién de interfaces de usuario interactivas usando\nReact y Redux. * Integracién continua y despliegue (CI/CD) con Jenkins y\nDocker. * Mentorizacién de desarrolladores junior y revisién de cdédigo.\n\nDesarrollador Backend | Innovatech Corp. | Barcelona, Espafia Marzo 2019 —\nEnero 2022 * Desarrollo de APIs REST con Django y Django REST Framework,\nmanejando una base de datos MySQL. * Optimizacién de consultas de base de\ndatos que redujo el tiempo de respuesta en un 30%. * Participacién activa\nen el ciclo de vida completo del desarrollo de software, incluyendo andlisis de\nrequisitos, diseno, codificacién, pruebas y soporte.\n\nEducacién\n\nMaster en Ingenieria Informatica | Universidad Politécnica de Madrid |\nMadrid, Espanta Septiembre 2017 — Julio 2019\n"
+}
