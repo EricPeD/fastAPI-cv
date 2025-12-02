@@ -83,7 +83,7 @@ Para probar la API localmente, tu base de datos de Supabase **debe contener dato
     *   Dale un `name` y asócialo a tu `id_user`.
     *   En el campo `info` (JSONB), asegúrate de tener una clave `callbackURL` (ej. `https://webhook.site/your-unique-url`).
     *   **Copia el `id` (UUID) de este endpoint**. Lo necesitarás para la URL de la petición.
-*   **Scripts de Ayuda**: Para facilitar la creación de estos datos durante el desarrollo sin acceder directamente al dashboard de Supabase, puedes crear un endpoint temporal en tu aplicación FastAPI (consulta `fastAPI-Apuntes/9_Full_Debugging_Log.md` para ejemplos de cómo se hizo durante la depuración).
+*   **Scripts de Ayuda**: Para facilitar la creación de estos datos durante el desarrollo sin acceder directamente al dashboard de Supabase, puedes crear un endpoint temporal en tu aplicación FastAPI.
 
 ### 4. Ejecución
 

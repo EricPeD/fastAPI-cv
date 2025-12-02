@@ -9,6 +9,8 @@ from PIL import Image
 import pytesseract
 from pathlib import Path
 from uuid import UUID
+import io
+import base64
 
 from src.config import logger, openai_client, supabase_client
 from src.models import CVInfo
@@ -23,6 +25,120 @@ def get_mime_type(file_path: Path) -> str | None:
     mime_type, _ = mimetypes.guess_type(file_path.name)
     return mime_type
 
+async def extract_info_with_openai_vision(file_path: Path) -> CVInfo | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key or api_key == "YOUR_API_KEY":
+        logger.error("Error: La clave de API de OpenAI no está configurada.")
+        return None
+
+    if not file_path.exists():
+        logger.error(f"Archivo no encontrado para OpenAI Vision: {file_path}")
+        return None
+
+    messages_content = [{"type": "text", "text": "Extrae toda la información de este CV en formato JSON exacto."}]
+    
+    mime_type = get_mime_type(file_path)
+    
+    if mime_type == "application/pdf":
+        try:
+            document = fitz.open(file_path)
+            for page_num, page in enumerate(document):
+                if page_num >= 10: # Limitar a las primeras 5 páginas
+                    logger.warning(f"CV {file_path.name} tiene más de 5 páginas. Solo se procesarán las primeras 5.")
+                    break
+                pix = page.get_pixmap()
+                img_bytes = io.BytesIO()
+                # Guardar el pixmap como PNG en memoria
+                Image.frombytes("RGB", [pix.width, pix.height], pix.samples).save(img_bytes, format="PNG")
+                base64_image = base64.b64encode(img_bytes.getvalue()).decode("utf-8")
+                messages_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{base64_image}", "detail": "high"}
+                })
+            document.close()
+            if len(messages_content) == 1: # Check if any images were added
+                logger.error(f"No se pudo extraer ninguna imagen de las páginas del PDF {file_path.name}.")
+                return None
+        except Exception as e:
+            logger.exception(f"Error al procesar PDF para OpenAI Vision {file_path.name}: {e}")
+            return None
+    elif mime_type and mime_type.startswith("image/"):
+        try:
+            with open(file_path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode("utf-8")
+            messages_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime_type};base64,{base64_image}", "detail": "high"}
+            })
+        except Exception as e:
+            logger.exception(f"Error al procesar imagen para OpenAI Vision {file_path.name}: {e}")
+            return None
+    else:
+        logger.error(f"Tipo de archivo no soportado para OpenAI Vision: {mime_type} en {file_path.name}")
+        return None
+    
+    system_prompt = """
+    Eres un experto en reclutamiento y análisis de currículums.
+    Analiza cuidadosamente la(s) imagen(es) del CV que se te proporciona(n) y extrae toda la información relevante.
+    Devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:
+    {
+        "name": "string o null",
+        "email": "string o null",
+        "phone": "string o null",
+        "resumen": "string o null",
+        "experiencia": [
+            {
+                "puesto": "string",
+                "empresa": "string",
+                "periodo": "string",
+                "descripcion": "string"
+            }
+        ],
+        "educacion": [
+            {
+                "titulo": "string",
+                "institucion": "string",
+                "periodo": "string"
+            }
+        ],
+        "habilidades": ["string"],
+        "soft_skills": ["string"]
+    }
+    - Usa listas vacias [] si no hay datos en experiencia, educacion, habilidades, etc.
+    - El JSON debe ser 100% valido y parseable y no debe contener ningun otro texto o marcador como "```json".
+    - No puedes fallar en la extraccion de datos de contacto.
+    """
+
+    try:
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o-mini", # Usar gpt-4o para mejor capacidad de visión
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": messages_content},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.1,
+            max_tokens=2000
+        )
+
+        json_text = response.choices[0].message.content.strip()
+        
+        # Limpieza adicional de la respuesta de la IA
+        if json_text.startswith("```json"):
+            json_text = json_text[7:-3].strip()
+        elif json_text.startswith("```"):
+            json_text = json_text[3:-3].strip()
+
+        extracted_data = json.loads(json_text)
+        # No hay "full_text" ya que se procesa como imagen
+        return CVInfo(**extracted_data)
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Error: La IA devolvió JSON inválido en OpenAI Vision:\n{json_text}\nError: {e}")
+        return None
+    except Exception as e:
+        logger.exception(f"Error al procesar el CV con OpenAI Vision: {e}")
+        return None
 
 def extract_text_from_pdf(pdf_path: Path) -> str:
     text = ""
@@ -60,7 +176,7 @@ def extract_text_from_image(image_path: Path) -> str:
     return text
 
 
-async def extract_info_with_openai(text: str) -> CVInfo | None:
+async def extract_info_from_text_with_openai(text: str) -> CVInfo | None:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or api_key == "YOUR_API_KEY":
         logger.error("Error: La clave de API de OpenAI no está configurada.")
@@ -129,6 +245,14 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
 
         request_data = req_response.data
         endpoint_info = request_data.get("endpoints", {}).get("info", {})
+
+        # Parche para manejar el caso en que 'info' se almacena como un string de JSON
+        if isinstance(endpoint_info, str):
+            try:
+                endpoint_info = json.loads(endpoint_info)
+            except json.JSONDecodeError:
+                raise ValueError(f"El campo 'info' del endpoint para la petición {id_request} no es un JSON válido.")
+
         callback_url = endpoint_info.get("callbackURL")
 
         if not callback_url:
@@ -139,36 +263,61 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
             f"Petición {id_request} y endpoint {request_data.get('endpoint_id')} encontrados. Callback URL: {callback_url}"
         )
 
-        # 2. Procesar el archivo
-        mime_type = get_mime_type(file_path)
-        logger.info(f"Procesando archivo {file_path.name} con tipo MIME: {mime_type}")
-        extracted_text = ""
-        if mime_type == "application/pdf":
-            extracted_text = extract_text_from_pdf(file_path)
-        elif (
-            mime_type
-            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ):
-            extracted_text = extract_text_from_docx(file_path)
-        elif mime_type and mime_type.startswith("image/"):
-            loop = asyncio.get_running_loop()
-            extracted_text = await loop.run_in_executor(
-                None,  # Usa el executor por defecto (ThreadPoolExecutor)
-                extract_text_from_image,
-                file_path,
-            )
-        else:
-            raise ValueError(f"Tipo de archivo no soportado: {mime_type}")
+        # 2. Procesar el archivo con la nueva lógica y fallback
+        cv_info: CVInfo | None = None
+        mode = endpoint_info.get("analysis_mode", "vision_first")  # Default a vision_first
 
-        if not extracted_text:
-            raise ValueError("No se pudo extraer texto del archivo o está vacío.")
-        logger.info(
-            f"Texto extraído del CV para la petición {id_request}. Longitud: {len(extracted_text)}"
-        )
+        # --- Intento con OpenAI Vision ---
+        if mode in ["vision_first", "vision_only"]:
+            try:
+                logger.info(f"Intentando análisis con 'openai_vision' para petición {id_request}")
+                cv_info = await extract_info_with_openai_vision(file_path)
+                if cv_info:
+                    logger.info(f"Análisis 'openai_vision' exitoso para petición {id_request}.")
+            except Exception as e:
+                logger.warning(f"Análisis 'openai_vision' falló para petición {id_request}: {e}")
+                if mode == "vision_only":
+                    raise  # Si el modo es solo visión, no hacemos fallback, la excepción se relanza.
 
-        cv_info = await extract_info_with_openai(extracted_text)
+        # --- Fallback o Intento Directo con Manual Text ---
+        if cv_info is None:
+            if mode == "vision_first":
+                logger.info(f"Haciendo fallback a análisis 'manual_text' para petición {id_request}.")
+            elif mode == "manual_only":
+                logger.info(f"Iniciando análisis con 'manual_text' según configuración para petición {id_request}.")
+            
+            # Lógica de extracción de texto local
+            mime_type = get_mime_type(file_path)
+            logger.info(f"Procesando archivo {file_path.name} para texto manual con tipo MIME: {mime_type}")
+            extracted_text = ""
+            if mime_type == "application/pdf":
+                extracted_text = extract_text_from_pdf(file_path)
+            elif (
+                mime_type
+                == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ):
+                extracted_text = extract_text_from_docx(file_path)
+            elif mime_type and mime_type.startswith("image/"):
+                loop = asyncio.get_running_loop()
+                extracted_text = await loop.run_in_executor(
+                    None,  # Usa el executor por defecto (ThreadPoolExecutor)
+                    extract_text_from_image,
+                    file_path,
+                )
+            # No se soportan otros tipos para el modo manual
+            elif mime_type not in ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] and not (mime_type and mime_type.startswith("image/")):
+                 raise ValueError(f"Tipo de archivo no soportado para análisis manual: {mime_type}")
+
+
+            if not extracted_text:
+                raise ValueError("No se pudo extraer texto del archivo para el análisis manual o está vacío.")
+            logger.info(f"Texto extraído del CV para petición {id_request}. Longitud: {len(extracted_text)}")
+
+            cv_info = await extract_info_from_text_with_openai(extracted_text)
+        
         if not cv_info:
-            raise ValueError("Fallo en la extracción de información con OpenAI.")
+            raise ValueError("Todos los métodos de análisis fallaron para extraer información del CV.")
+        
         logger.info(
             f"Información de CV extraída con éxito para la petición {id_request}."
         )
@@ -244,3 +393,4 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
                 logger.exception(
                     f"Error al eliminar el archivo temporal {file_path.name}: {e}"
                 )
+                
