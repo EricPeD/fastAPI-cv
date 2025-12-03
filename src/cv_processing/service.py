@@ -25,7 +25,7 @@ def get_mime_type(file_path: Path) -> str | None:
     mime_type, _ = mimetypes.guess_type(file_path.name)
     return mime_type
 
-async def extract_info_with_openai_vision(file_path: Path) -> CVInfo | None:
+async def extract_info_with_openai_vision(file_path: Path, output_schema: dict | None = None) -> dict | None:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or api_key == "YOUR_API_KEY":
         logger.error("Error: La clave de API de OpenAI no está configurada.")
@@ -35,7 +35,7 @@ async def extract_info_with_openai_vision(file_path: Path) -> CVInfo | None:
         logger.error(f"Archivo no encontrado para OpenAI Vision: {file_path}")
         return None
 
-    messages_content = [{"type": "text", "text": "Extrae toda la información de este CV en formato JSON exacto."}]
+    messages_content = [{"type": "text", "text": "Extrae toda la información de este archivo en formato JSON exacto."}]
     
     mime_type = get_mime_type(file_path)
     
@@ -43,8 +43,8 @@ async def extract_info_with_openai_vision(file_path: Path) -> CVInfo | None:
         try:
             document = fitz.open(file_path)
             for page_num, page in enumerate(document):
-                if page_num >= 10: # Limitar a las primeras 5 páginas
-                    logger.warning(f"CV {file_path.name} tiene más de 5 páginas. Solo se procesarán las primeras 5.")
+                if page_num >= 10: # Limitar a las primeras 10 páginas
+                    logger.warning(f"CV {file_path.name} tiene más de 10 páginas. Solo se procesarán las primeras 10.")
                     break
                 pix = page.get_pixmap()
                 img_bytes = io.BytesIO()
@@ -77,51 +77,36 @@ async def extract_info_with_openai_vision(file_path: Path) -> CVInfo | None:
         logger.error(f"Tipo de archivo no soportado para OpenAI Vision: {mime_type} en {file_path.name}")
         return None
     
-    system_prompt = """
-    Eres un experto en reclutamiento y análisis de currículums.
-    Analiza cuidadosamente la(s) imagen(es) del CV que se te proporciona(n) y extrae toda la información relevante.
-    Devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:
-    {
-        "name": "string o null",
-        "email": "string o null",
-        "phone": "string o null",
-        "resumen": "string o null",
-        "experiencia": [
-            {
-                "puesto": "string",
-                "empresa": "string",
-                "periodo": "string",
-                "descripcion": "string"
-            }
-        ],
-        "educacion": [
-            {
-                "titulo": "string",
-                "institucion": "string",
-                "periodo": "string"
-            }
-        ],
-        "habilidades": ["string"],
-        "soft_skills": ["string"]
-    }
-    - Usa listas vacias [] si no hay datos en experiencia, educacion, habilidades, etc.
-    - El JSON debe ser 100% valido y parseable y no debe contener ningun otro texto o marcador como "```json".
-    - No puedes fallar en la extraccion de datos de contacto.
-    """
+    if not output_schema:
+        raise ValueError("El esquema de salida (output_schema) es obligatorio para el análisis.")
 
+    schema_string = json.dumps(output_schema, indent=2, ensure_ascii=False)
+    system_prompt = f"""
+    Eres un agente de IA autónomo especializado en el análisis de documentos. Tu objetivo es procesar el siguiente documento (proporcionado como imagen) y extraer la información solicitada en un formato JSON estricto.
+
+    OBJETIVO ACTUAL: Analizar un documento.
+    ESQUEMA DE SALIDA REQUERIDO (DEBES SEGUIRLO ESTRICTAMENTE):
+    {schema_string}
+
+    REGLAS ADICIONALES:
+    - Tu respuesta debe ser ÚNICAMENTE el objeto JSON puro y válido. No incluyas texto introductorio, comentarios, ni bloques de código como ```json.
+    - No inventes información que no esté explícitamente en el documento.
+    """
+    
     try:
         response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini", # Usar gpt-4o para mejor capacidad de visión
+            model="gpt-5-nano",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": messages_content},
             ],
             response_format={"type": "json_object"},
-            temperature=0.1,
-            max_tokens=2000
+            # temperature=0.1,
+            max_completion_tokens=10000 # Parámetro corregido
         )
 
         json_text = response.choices[0].message.content.strip()
+        logger.debug(f"Raw JSON response from OpenAI Vision: {json_text}")
         
         # Limpieza adicional de la respuesta de la IA
         if json_text.startswith("```json"):
@@ -130,8 +115,8 @@ async def extract_info_with_openai_vision(file_path: Path) -> CVInfo | None:
             json_text = json_text[3:-3].strip()
 
         extracted_data = json.loads(json_text)
-        # No hay "full_text" ya que se procesa como imagen
-        return CVInfo(**extracted_data)
+        
+        return extracted_data
 
     except json.JSONDecodeError as e:
         logger.error(f"Error: La IA devolvió JSON inválido en OpenAI Vision:\n{json_text}\nError: {e}")
@@ -176,40 +161,45 @@ def extract_text_from_image(image_path: Path) -> str:
     return text
 
 
-async def extract_info_from_text_with_openai(text: str) -> CVInfo | None:
+async def extract_info_from_text_with_openai(text: str, output_schema: dict | None = None) -> dict | None:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or api_key == "YOUR_API_KEY":
         logger.error("Error: La clave de API de OpenAI no está configurada.")
         return None
 
-    system_prompt = """
-    Eres un asistente experto en reclutamiento y análisis de currículums.
-    Tu tarea es analizar el texto de un CV que te proporcionaré y extraer la información clave.
-    Debes devolver la información únicamente en formato JSON, siguiendo esta estructura:
-    {
-        "name": "string", "email": "string", "phone": "string", "resumen": "string",
-        "experiencia": [{"puesto": "string", "empresa": "string", "periodo": "string", "descripcion": "string"}],
-        "educacion": [{"titulo": "string", "institucion": "string", "periodo": "string"}],
-        "habilidades": ["string"], "soft_skills": ["string"]
-    }
-    Si no encuentras información para un campo principal (ej. name, email), usa `null`. Para elementos dentro de listas (ej. habilidades, soft_skills), omite el elemento de la lista si no se encuentra un valor válido, en lugar de usar `null`. El JSON debe ser completo y válido.
+    if not output_schema:
+        raise ValueError("El esquema de salida (output_schema) es obligatorio para el análisis.")
+
+    schema_string = json.dumps(output_schema, indent=2, ensure_ascii=False)
+    system_prompt = f"""
+    Eres un agente de IA autónomo especializado en el análisis de documentos. Tu objetivo es procesar el siguiente documento (proporcionado como texto) y extraer la información solicitada en un formato JSON estricto.
+
+    OBJETIVO ACTUAL: Analizar un documento de texto.
+    ESQUEMA DE SALIDA REQUERIDO (DEBES SEGUIRLO ESTRICTAMENTE):
+    {schema_string}
+
+    REGLAS ADICIONALES:
+    - Tu respuesta debe ser ÚNICAMENTE el objeto JSON puro y válido. No incluyas texto introductorio, comentarios, ni bloques de código como ```json.
+    - No inventes información que no esté explícitamente en el documento.
     """
-    user_prompt = f"Analiza el siguiente texto de CV y extráelo en el formato JSON especificado:\n---\n{text}\n---"
+    user_prompt = f"Analiza el siguiente texto y extrae la información destacable en el formato JSON especificado:\n---\n{text}\n---"
 
     try:
         response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-nano",
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.2,
         )
         response_content = response.choices[0].message.content
+        logger.debug(f"Raw JSON response from OpenAI Text: {response_content}")
         extracted_data = json.loads(response_content)
-        extracted_data["full_text"] = text
-        return CVInfo(**extracted_data)
+
+        # Siempre se devuelve un diccionario porque el esquema es dinámico
+        return extracted_data
+            
     except Exception as e:
         logger.exception(f"Error en la API de OpenAI: {e}")
         return None
@@ -254,6 +244,7 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
                 raise ValueError(f"El campo 'info' del endpoint para la petición {id_request} no es un JSON válido.")
 
         callback_url = endpoint_info.get("callbackURL")
+        output_schema = endpoint_info.get("schema") # Extraer el esquema personalizado
 
         if not callback_url:
             raise ValueError(
@@ -264,14 +255,14 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         )
 
         # 2. Procesar el archivo con la nueva lógica y fallback
-        cv_info: CVInfo | None = None
+        cv_info: dict | None = None # Cambiado a dict
         mode = endpoint_info.get("analysis_mode", "vision_first")  # Default a vision_first
 
         # --- Intento con OpenAI Vision ---
         if mode in ["vision_first", "vision_only"]:
             try:
                 logger.info(f"Intentando análisis con 'openai_vision' para petición {id_request}")
-                cv_info = await extract_info_with_openai_vision(file_path)
+                cv_info = await extract_info_with_openai_vision(file_path, output_schema) # Pasar el schema
                 if cv_info:
                     logger.info(f"Análisis 'openai_vision' exitoso para petición {id_request}.")
             except Exception as e:
@@ -313,7 +304,7 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
                 raise ValueError("No se pudo extraer texto del archivo para el análisis manual o está vacío.")
             logger.info(f"Texto extraído del CV para petición {id_request}. Longitud: {len(extracted_text)}")
 
-            cv_info = await extract_info_from_text_with_openai(extracted_text)
+            cv_info = await extract_info_from_text_with_openai(extracted_text, output_schema) # Pasar el schema
         
         if not cv_info:
             raise ValueError("Todos los métodos de análisis fallaron para extraer información del CV.")
@@ -324,7 +315,7 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
 
         # 3. Preparar resultados
         status = "completed"
-        payload_out = {"status": status, "data": cv_info.model_dump()}
+        payload_out = {"status": status, "data": cv_info}
 
     except Exception as e:
         status = "failed"
@@ -365,20 +356,32 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
                 f"Error al insertar el log para la petición {id_request}: {e}"
             )
 
-        # 6. Enviar notificación al callback
+        # 6. Enviar notificación al callback con lógica de reintentos
         if endpoint_info and (callback_url := endpoint_info.get("callbackURL")):
-            async with httpx.AsyncClient() as async_client:
+            retries = 3
+            delay = 2.0  # en segundos
+            for i in range(retries):
                 try:
-                    await async_client.post(
-                        callback_url, json=payload_out, timeout=30.0
+                    async with httpx.AsyncClient() as async_client:
+                        response = await async_client.post(
+                            callback_url, json=payload_out, timeout=30.0
+                        )
+                        response.raise_for_status()  # Lanza excepción para respuestas 4xx/5xx
+                        logger.info(
+                            f"Resultado enviado al callback {callback_url} para la petición {id_request} (intento {i+1})."
+                        )
+                        break  # Salir del bucle si tiene éxito
+                except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                    logger.warning(
+                        f"Fallo al enviar callback para {id_request} (intento {i+1}/{retries}): {e}"
                     )
-                    logger.info(
-                        f"Resultado enviado al callback {callback_url} para la petición {id_request}."
-                    )
-                except httpx.RequestError as e:
-                    logger.exception(
-                        f"Error al enviar el resultado al callback para la petición {id_request} a {callback_url}: {e}"
-                    )
+                    if i < retries - 1:
+                        await asyncio.sleep(delay)
+                        delay *= 2  # Backoff exponencial
+                    else:
+                        logger.error(
+                            f"Fallo final al enviar callback para {id_request} tras {retries} intentos."
+                        )
         else:
             logger.warning(
                 f"No se pudo enviar el callback para la petición {id_request}: No se encontró callbackURL."

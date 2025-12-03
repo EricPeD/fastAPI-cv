@@ -11,3 +11,4 @@ commit_message.txt
 tests/GEMINI.md
 tests/test_main.py
 app.log
+temp/

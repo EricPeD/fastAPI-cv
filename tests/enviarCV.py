@@ -6,28 +6,25 @@ from pathlib import Path
 # --- Configuración ---
 BASE_URL = "http://127.0.0.1:8000"
 ENDPOINT_ID = (
-    "1edb42d6-2410-4e52-92a1-61ac958182a4"  # Reemplaza con tu ID de endpoint real
+    "318e4755-d9be-4c8c-9365-623554cb8776"  # Reemplaza con tu ID de endpoint real
 )
-API_KEY = "082db487-cc96-4312-beed-ece21d33bc5d.e5556906dacd08893ebbfbf5864f2a91801130497387a7a0cdb6e52b4b4822d0"  # Reemplaza con tu API Key real (ej. "082db487-...d.e5556906...")
+API_KEY = "4a868774-7654-4106-b1b6-97e05d5c09be"  # Reemplaza con tu API Key real (ej. "082db487-...d.e5556906...")
 FILES_TO_SEND = [
-    # Path("testCV/cv/sample_cv.pdf"),
-    # Path("testCV/cv/sample_cv_variant_01.pdf"),
-    # Path("testCV/cv/sample_cv_variant_02.pdf"),
-    # Path("testCV/cv/sample_cv_variant_03.pdf"),
-    # Path("testCV/cv/sample_cv_variant_04.pdf"),
-    # Path("testCV/cv/sample_cv_variant_05.pdf"),
-    # Path("testCV/cv/sample_cv_variant_06.pdf"),
-    # Path("testCV/cv/sample_cv_variant_07.pdf"),
-    # Path("testCV/cv/sample_cv_variant_08.pdf"),
-    # Path("testCV/cv/sample_cv_variant_09.pdf"),
-    # Path("testCV/cv/sample_cv_variant_10.pdf"),
-    # Path("testCV/cv/sample_cv_variant_11.pdf"),
-    # Path("testCV/cv/sample_cv_variant_12.pdf"),
-    # Path("testCV/cv/sample_cv_variant_13.pdf"),
-    # Path("testCV/cv/sample_cv_variant_14.pdf"),
-    Path("testCV/cv/CV_Nicolas_Penuela.png"),
-    Path("testCV/cv/CV_Nicolas_Penuela.png"),
-    Path("testCV/cv/CV_Nicolas_Penuela.png"),
+    Path("testCV/cv/sample_cv.pdf"),
+    Path("testCV/cv/sample_cv_variant_01.pdf"),
+    Path("testCV/cv/sample_cv_variant_02.pdf"),
+    Path("testCV/cv/sample_cv_variant_03.pdf"),
+    Path("testCV/cv/sample_cv_variant_04.pdf"),
+    Path("testCV/cv/sample_cv_variant_05.pdf"),
+    Path("testCV/cv/sample_cv_variant_06.pdf"),
+    Path("testCV/cv/sample_cv_variant_07.pdf"),
+    Path("testCV/cv/sample_cv_variant_08.pdf"),
+    Path("testCV/cv/sample_cv_variant_09.pdf"),
+    Path("testCV/cv/sample_cv_variant_10.pdf"),
+    Path("testCV/cv/sample_cv_variant_11.pdf"),
+    Path("testCV/cv/sample_cv_variant_12.pdf"),
+    Path("testCV/cv/sample_cv_variant_13.pdf"),
+    Path("testCV/cv/sample_cv_variant_14.pdf"),
     Path("testCV/cv/CV_Nicolas_Penuela.png"),
 ]
 
