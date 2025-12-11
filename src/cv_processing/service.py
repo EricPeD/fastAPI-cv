@@ -14,12 +14,15 @@ import base64
 
 from src.config import logger, openai_client, supabase_client
 from src.models import CVInfo
+from src.users.service import check_credits, deduct_credits
 
 
 # Directorio temporal para los CVs.
 TEMP_CV_DIR = Path("temp")
 TEMP_CV_DIR.mkdir(exist_ok=True)
 
+# Costo en créditos por cada procesamiento de CV
+CREDIT_COST = 100
 
 def get_mime_type(file_path: Path) -> str | None:
     mime_type, _ = mimetypes.guess_type(file_path.name)
@@ -219,6 +222,7 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
     payload_out = None
     error_message = None
     status = "failed"  # Default status in case of immediate failure
+    user_id = None
 
     try:
         logger.info(f"Iniciando procesamiento de CV para la petición: {id_request}")
@@ -234,7 +238,12 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
             raise ValueError(f"No se encontró la petición con id {id_request}")
 
         request_data = req_response.data
+        user_id = request_data.get("id_user")
         endpoint_info = request_data.get("endpoints", {}).get("info", {})
+
+        # Verificar créditos antes de continuar
+        if user_id and not await check_credits(user_id, CREDIT_COST):
+            raise ValueError(f"Créditos insuficientes para el usuario {user_id}. Se requieren {CREDIT_COST} créditos.")
 
         # Parche para manejar el caso en que 'info' se almacena como un string de JSON
         if isinstance(endpoint_info, str):
@@ -312,6 +321,11 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         logger.info(
             f"Información de CV extraída con éxito para la petición {id_request}."
         )
+
+        # Deducir créditos solo si el procesamiento fue exitoso
+        if user_id:
+            await deduct_credits(user_id, CREDIT_COST)
+            logger.info(f"Se han deducido {CREDIT_COST} créditos al usuario {user_id}.")
 
         # 3. Preparar resultados
         status = "completed"

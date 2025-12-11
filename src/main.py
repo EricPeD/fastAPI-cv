@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from src.config import logger, supabase_client
 from src.cv_processing.router import router as cv_processing_router
+from src.users.router import router as users_router
 from uuid import UUID, uuid4  # Import uuid4 for generating UUIDs
 from postgrest.exceptions import APIError
 
@@ -15,6 +16,7 @@ app = FastAPI(
 
 # Incluir routers
 app.include_router(cv_processing_router)
+app.include_router(users_router, prefix="/users")
 
 from fastapi.middleware.cors import CORSMiddleware # test frontend - backend
 app.add_middleware(
