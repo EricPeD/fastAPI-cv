@@ -11,10 +11,10 @@ from src.cv_processing.service import process_cv_and_callback, TEMP_CV_DIR
 
 router = APIRouter(
     # prefix="/cv",
-    tags=["CV Processing"],
+    tags=["FILE Processing"],
 )
 
-@router.post("/{endpoint_id}", status_code=202, summary="Subir CV")
+@router.post("/{endpoint_id}", status_code=202, summary="Subir achivo")
 async def upload_cv(
     endpoint_id: UUID,
     background_tasks: BackgroundTasks,
