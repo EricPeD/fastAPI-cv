@@ -29,8 +29,6 @@ try:
 except Exception as e:
     logger.error(f"Error al inicializar el cliente de OpenAI: {e}")
     exit(1)
-    # Podrías querer que la aplicación falle al iniciar si OpenAI es crítico.
-    # exit(1)
 
 # Inicialización de Supabase
 try:
@@ -40,14 +38,14 @@ try:
     if not SUPABASE_URL or not SUPABASE_KEY:
         logger.error("Error: Supabase URL o Key no configurados en .env")
         # Considerar elevar una excepción o salir en entornos de producción.
-        # exit(1)
+        exit(1)
 
     supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 except ImportError:
     logger.error(
         "Error: La librería 'supabase' no está instalada. Por favor, ejecuta 'pip install supabase'"
     )
-    # exit(1)
+    exit(1)
 except Exception as e:
     logger.error(f"Error al inicializar el cliente de Supabase: {e}")
-    # exit(1)
+    exit(1)

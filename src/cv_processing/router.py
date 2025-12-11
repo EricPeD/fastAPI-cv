@@ -10,10 +10,9 @@ from src.models import AuthActor
 from src.cv_processing.service import process_cv_and_callback, TEMP_CV_DIR
 
 router = APIRouter(
-    prefix="/cv",
+    # prefix="/cv",
     tags=["CV Processing"],
 )
-
 
 @router.post("/{endpoint_id}", status_code=202, summary="Subir CV")
 async def upload_cv(

@@ -5,6 +5,7 @@ from uuid import UUID, uuid4  # Import uuid4 for generating UUIDs
 from postgrest.exceptions import APIError
 
 
+
 # Inicialización de la aplicación FastAPI.
 app = FastAPI(
     title="API de Procesamiento de CVs",
@@ -15,6 +16,14 @@ app = FastAPI(
 # Incluir routers
 app.include_router(cv_processing_router)
 
+from fastapi.middleware.cors import CORSMiddleware # test frontend - backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permitir todos los orígenes para desarrollo/depuración
+    allow_credentials=True,
+    allow_methods=["*"], # Permitir todos los métodos
+    allow_headers=["*"],
+)
 
 @app.get("/", summary="Endpoint de Bienvenida")
 async def read_root():
