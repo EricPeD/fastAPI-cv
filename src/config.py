@@ -47,5 +47,7 @@ except ImportError:
     )
     exit(1)
 except Exception as e:
-    logger.error(f"Error al inicializar el cliente de Supabase: {e}")
     exit(1)
+
+# Costo en créditos por cada procesamiento de CV
+CREDIT_COST = 100
