@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import io
+import mimetypes
 from pathlib import Path
 from PIL import Image
 import fitz
