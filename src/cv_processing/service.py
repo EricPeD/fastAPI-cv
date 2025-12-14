@@ -20,7 +20,7 @@ TEMP_CV_DIR.mkdir(exist_ok=True)
 async def _get_request_details(id_request: UUID) -> dict:
     """Helper to fetch request and endpoint data."""
     try:
-        response = (
+        response = await (
             supabase_client.from_("requests")
             .select("*, endpoints(info)")
             .eq("id_request", str(id_request))
@@ -134,7 +134,7 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         # 4. Actualizar estado y registrar log
         try:
             credit_use = usage_data.total_tokens if usage_data and status == "completed" else 0
-            supabase_client.from_("requests").update({"status": status, "tokens_used": credit_use}).eq("id_request", str(id_request)).execute()
+            await supabase_client.from_("requests").update({"status": status, "tokens_used": credit_use}).eq("id_request", str(id_request)).execute()
             
             log_entry = {
                 "id_request": str(id_request),
@@ -142,7 +142,7 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
                 "error": error_message,
                 "credit_use": credit_use,
             }
-            supabase_client.from_("request_logs").insert(log_entry).execute()
+            await supabase_client.from_("request_logs").insert(log_entry).execute()
         except Exception as e:
             logger.exception(f"Error crítico al actualizar el estado o registrar el log para la petición {id_request}: {e}")
 

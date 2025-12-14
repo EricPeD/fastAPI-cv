@@ -2,7 +2,7 @@ import logging
 import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
-from supabase import create_client, Client
+from supabase import create_client, Client, create_async_client
 from pathlib import Path # Nueva importación
 
 
@@ -40,14 +40,12 @@ try:
         # Considerar elevar una excepción o salir en entornos de producción.
         exit(1)
 
-    supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    supabase_client: Client = create_async_client(SUPABASE_URL, SUPABASE_KEY)
 except ImportError:
     logger.error(
         "Error: La librería 'supabase' no está instalada. Por favor, ejecuta 'pip install supabase'"
     )
     exit(1)
 except Exception as e:
+    logger.error(f"Error al inicializar el cliente de Supabase: {e}")
     exit(1)
-
-# Costo en créditos por cada procesamiento de CV
-CREDIT_COST = 100

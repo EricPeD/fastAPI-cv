@@ -7,21 +7,13 @@ async def get_user_credits(user_id: str) -> int | None:
     Returns None if the user is not found.
     """
     try:
-        response = supabase_client.from_("users").select("credits").eq("id_user", user_id).single().execute()
+        response = await supabase_client.from_("users").select("credits").eq("id_user", user_id).single().execute()
         if response.data:
             return response.data.get("credits")
         return None
     except Exception as e:
         logger.error(f"Error fetching user credits for {user_id}: {e}")
         raise DatabaseError("Error al obtener los créditos del usuario.")
-
-async def check_credits(user_id: str, amount_to_deduct: int):
-    """
-    Checks if a user has enough credits. Raises InsufficientCreditsError if not.
-    """
-    current_credits = await get_user_credits(user_id)
-    if current_credits is None or current_credits < amount_to_deduct:
-        raise InsufficientCreditsError(required=amount_to_deduct)
 
 async def deduct_credits_atomic(user_id: str, amount: int) -> bool:
     """
