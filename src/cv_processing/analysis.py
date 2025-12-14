@@ -4,13 +4,15 @@ import base64
 import io
 import mimetypes
 from pathlib import Path
+from typing import Tuple
 from PIL import Image
 import fitz
 
 from src.config import logger, openai_client
 from src.exceptions import OpenAIError
+from src.models import Usage
 
-async def extract_info_with_openai_vision(file_path: Path, output_schema: dict) -> dict:
+async def extract_info_with_openai_vision(file_path: Path, output_schema: dict) -> Tuple[dict, Usage]:
     if not file_path.exists():
         raise FileNotFoundError(f"Archivo no encontrado para OpenAI Vision: {file_path}")
 
@@ -65,15 +67,16 @@ async def extract_info_with_openai_vision(file_path: Path, output_schema: dict) 
             model="gpt-5-nano",
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": messages_content}],
             response_format={"type": "json_object"},
-            max_tokens=2048,
+            max_completion_tokens=2048,
         )
         json_text = response.choices[0].message.content.strip()
-        return json.loads(json_text)
+        usage = Usage.model_validate(response.usage)
+        return json.loads(json_text), usage
     except Exception as e:
         logger.exception(f"Error al procesar el CV con OpenAI Vision: {e}")
         raise OpenAIError("Error en la llamada a la API de OpenAI Vision.")
 
-async def extract_info_from_text_with_openai(text: str, output_schema: dict) -> dict:
+async def extract_info_from_text_with_openai(text: str, output_schema: dict) -> Tuple[dict, Usage]:
     if not text:
         raise ValueError("El texto de entrada no puede estar vacío.")
 
@@ -93,7 +96,8 @@ async def extract_info_from_text_with_openai(text: str, output_schema: dict) -> 
             response_format={"type": "json_object"},
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
         )
-        return json.loads(response.choices[0].message.content)
+        usage = Usage.model_validate(response.usage)
+        return json.loads(response.choices[0].message.content), usage
     except Exception as e:
         logger.exception(f"Error en la API de OpenAI (texto): {e}")
         raise OpenAIError("Error en la llamada a la API de OpenAI (texto).")

@@ -5,10 +5,12 @@ import json
 import httpx
 from pathlib import Path
 from uuid import UUID
+from typing import Tuple
 
-from src.config import logger, supabase_client, CREDIT_COST
-from src.users.service import check_credits, deduct_credits_atomic
-from src.exceptions import DatabaseError, FileProcessingError, OpenAIError
+from src.config import logger, supabase_client
+from src.users.service import deduct_credits_atomic
+from src.exceptions import DatabaseError, FileProcessingError, OpenAIError, InsufficientCreditsError
+from src.models import Usage
 from . import analysis, extraction
 
 # Directorio temporal para los CVs.
@@ -42,12 +44,15 @@ def _get_text_extractor(mime_type: str | None):
         return extraction.extract_text_from_image
     return None
 
-async def _run_analysis(mode: str, file_path: Path, output_schema: dict) -> dict:
-    """Orchestrates the analysis process (vision-first or manual-first)."""
-    cv_info = None
+async def _run_analysis(mode: str, file_path: Path, output_schema: dict) -> Tuple[dict, Usage]:
+    """Orchestrates the analysis process and aggregates token usage."""
+    cv_info: dict | None = None
+    total_usage: Usage | None = None
+
     if mode in ["vision_first", "vision_only"]:
         try:
-            cv_info = await analysis.extract_info_with_openai_vision(file_path, output_schema)
+            cv_info, vision_usage = await analysis.extract_info_with_openai_vision(file_path, output_schema)
+            total_usage = vision_usage
             logger.info(f"Análisis 'openai_vision' exitoso para {file_path.name}.")
         except OpenAIError as e:
             if mode == "vision_only":
@@ -66,12 +71,16 @@ async def _run_analysis(mode: str, file_path: Path, output_schema: dict) -> dict
         if not extracted_text:
             raise FileProcessingError("No se pudo extraer texto del archivo para el análisis manual.")
         
-        cv_info = await analysis.extract_info_from_text_with_openai(extracted_text, output_schema)
+        cv_info, text_usage = await analysis.extract_info_from_text_with_openai(extracted_text, output_schema)
+        if total_usage:
+            total_usage += text_usage
+        else:
+            total_usage = text_usage
 
-    if not cv_info:
-        raise OpenAIError("Todos los métodos de análisis fallaron para extraer información del CV.")
+    if not cv_info or not total_usage:
+        raise OpenAIError("Todos los métodos de análisis fallaron para extraer información o uso de tokens del CV.")
     
-    return cv_info
+    return cv_info, total_usage
 
 async def process_cv_and_callback(id_request: UUID, file_path: Path):
     """
@@ -81,6 +90,7 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
     error_message = None
     user_id = None
     endpoint_info = {}
+    usage_data: Usage | None = None
 
     try:
         request_data = await _get_request_details(id_request)
@@ -90,33 +100,28 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         if isinstance(endpoint_info, str):
             endpoint_info = json.loads(endpoint_info)
         
-        # 1. Verificar créditos del usuario
-        if user_id:
-            await check_credits(user_id, CREDIT_COST)
-
-        # 2. Procesar el CV
+        # 1. Procesar el CV
         output_schema = endpoint_info.get("schema")
         if not output_schema:
             raise ValueError("El esquema de salida (output_schema) es obligatorio.")
         
         mode = endpoint_info.get("analysis_mode", "vision_first")
-        cv_info = await _run_analysis(mode, file_path, output_schema)
+        cv_info, usage_data = await _run_analysis(mode, file_path, output_schema)
         
-        # 3. Deducir créditos (operación atómica)
+        # 2. Deducir créditos (operación atómica)
         if user_id:
-            success = await deduct_credits_atomic(user_id, CREDIT_COST)
+            cost = usage_data.total_tokens
+            success = await deduct_credits_atomic(user_id, cost)
             if not success:
-                # This is a critical state: analysis was done but credits couldn't be deducted.
-                # Should be monitored closely.
-                logger.critical(f"¡CRÍTICO! No se pudieron deducir {CREDIT_COST} créditos al usuario {user_id} para la petición {id_request} tras un análisis exitoso.")
-                # Depending on business logic, we might still proceed or fail the request here.
-                # For now, we log it as critical and continue.
+                # This can happen if the user runs out of credits between the initial check and now.
+                logger.warning(f"No se pudieron deducir {cost} créditos al usuario {user_id} para la petición {id_request} (créditos insuficientes).")
+                raise InsufficientCreditsError(required=cost)
 
         status = "completed"
-        payload_out = {"status": status, "data": cv_info}
+        payload_out = {"status": status, "data": cv_info, "usage": usage_data.model_dump()}
         logger.info(f"Procesamiento para la petición {id_request} completado con éxito.")
 
-    except (DatabaseError, FileProcessingError, OpenAIError, ValueError) as e:
+    except (DatabaseError, FileProcessingError, OpenAIError, ValueError, InsufficientCreditsError) as e:
         error_message = str(e)
         payload_out = {"status": status, "error": error_message, "data": None}
         logger.exception(f"Fallo en el procesamiento para la petición {id_request}: {e}")
@@ -128,13 +133,14 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
     finally:
         # 4. Actualizar estado y registrar log
         try:
-            supabase_client.from_("requests").update({"status": status}).eq("id_request", str(id_request)).execute()
+            credit_use = usage_data.total_tokens if usage_data and status == "completed" else 0
+            supabase_client.from_("requests").update({"status": status, "tokens_used": credit_use}).eq("id_request", str(id_request)).execute()
             
             log_entry = {
                 "id_request": str(id_request),
                 "payload_out": payload_out,
                 "error": error_message,
-                "credit_use": CREDIT_COST if status == "completed" else 0,
+                "credit_use": credit_use,
             }
             supabase_client.from_("request_logs").insert(log_entry).execute()
         except Exception as e:
@@ -161,4 +167,4 @@ async def _send_callback(url: str, payload: dict, request_id: UUID):
             logger.warning(f"Fallo al enviar callback para {request_id} (intento {i+1}/3): {e}")
             if i < 2:
                 await asyncio.sleep(2.0 * (i + 1)) # Backoff lineal
-    logger.error(f"Fallo final al enviar callback para {request_id} tras 3 intentos.")
+    logger.error(f"Fallo final al enviar callback para {id_request} tras 3 intentos.")

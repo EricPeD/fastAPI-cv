@@ -55,3 +55,43 @@ class CallbackBody(BaseModel):
 class AuthActor(BaseModel):
     user_id: str
     key_id: UUID
+
+
+class InputTokensDetails(BaseModel):
+    cached_tokens: int = 0
+
+class OutputTokensDetails(BaseModel):
+    reasoning_tokens: int = 0
+
+class Usage(BaseModel):
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    input_tokens_details: InputTokensDetails | None = Field(default_factory=InputTokensDetails)
+    output_tokens_details: OutputTokensDetails | None = Field(default_factory=OutputTokensDetails)
+
+    def __add__(self, other: 'Usage'):
+        if not isinstance(other, Usage):
+            return NotImplemented
+
+        # Aggregate basic token counts
+        total_input = self.input_tokens + other.input_tokens
+        total_output = self.output_tokens + other.output_tokens
+        total_tokens = self.total_tokens + other.total_tokens
+
+        # Aggregate detailed token counts, handling potential None values
+        self_input_details = self.input_tokens_details or InputTokensDetails()
+        other_input_details = other.input_tokens_details or InputTokensDetails()
+        total_cached = self_input_details.cached_tokens + other_input_details.cached_tokens
+
+        self_output_details = self.output_tokens_details or OutputTokensDetails()
+        other_output_details = other.output_tokens_details or OutputTokensDetails()
+        total_reasoning = self_output_details.reasoning_tokens + other_output_details.reasoning_tokens
+
+        return Usage(
+            input_tokens=total_input,
+            output_tokens=total_output,
+            total_tokens=total_tokens,
+            input_tokens_details=InputTokensDetails(cached_tokens=total_cached),
+            output_tokens_details=OutputTokensDetails(reasoning_tokens=total_reasoning)
+        )
