@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 from pathlib import Path
 import shutil
 
-from src.config import logger, supabase_client
+from src.config import logger, get_supabase_client
 from src.auth import verify_api_key
 from src.models import AuthActor
 from src.cv_processing.service import process_cv_and_callback, TEMP_CV_DIR
@@ -20,7 +20,7 @@ async def verify_endpoint_access(endpoint_id: UUID, actor: AuthActor = Depends(v
     """
     try:
         response = await (
-            supabase_client.from_("endpoints")
+            get_supabase_client().from_("endpoints")
             .select("id_user, info, secret_webhook")
             .eq("id", str(endpoint_id))
             .single()
@@ -59,7 +59,7 @@ async def upload_cv(
             "endpoint_id": str(endpoint_id),
             "status": "processing",
         }
-        request_response = await supabase_client.from_("requests").insert(request_payload).execute()
+        request_response = await get_supabase_client().from_("requests").insert(request_payload).execute()
         id_request = request_response.data[0]["id_request"]
 
         # 2. Guardar el archivo en disco de forma segura

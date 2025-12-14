@@ -6,9 +6,9 @@ from pathlib import Path
 # --- Configuración ---
 BASE_URL = "http://51.77.150.113:8000"
 ENDPOINT_ID = (
-    "d3049ccd-ede3-40b0-a475-d8f620e4b495"  # Reemplaza con tu ID de endpoint real
+    "697888ca-9aa1-4c2c-8bd4-423769769f70"  # Reemplaza con tu ID de endpoint real
 )
-API_KEY = "4a868774-7654-4106-b1b6-97e05d5c09be"  # Reemplaza con tu API Key real (ej. "082db487-...d.e5556906...")
+API_KEY = "6e00bf49-e573-45ce-a691-aad0ba1686ed"  # Reemplaza con tu API Key real (ej. "082db487-...d.e5556906...")
 FILES_TO_SEND = [
     # Path("testCV/cv/sample_cv.pdf"),
     # Path("testCV/cv/sample_cv_variant_01.pdf"),

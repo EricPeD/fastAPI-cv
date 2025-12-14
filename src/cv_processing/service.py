@@ -10,7 +10,7 @@ from datetime import datetime
 import hmac
 import hashlib
 
-from src.config import logger, supabase_client
+from src.config import logger, get_supabase_client
 from src.users.service import deduct_credits_atomic
 from src.exceptions import DatabaseError, FileProcessingError, OpenAIError, InsufficientCreditsError
 from src.models import Usage
@@ -24,7 +24,7 @@ async def _get_request_details(id_request: UUID) -> dict:
     """Helper to fetch request and endpoint data."""
     try:
         response = await (
-            supabase_client.from_("requests")
+            get_supabase_client().from_("requests")
             .select("*, endpoints(info, secret_webhook)")
             .eq("id_request", str(id_request))
             .single()

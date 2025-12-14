@@ -2,8 +2,9 @@ import logging
 import os
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
-from supabase import create_client, Client, create_async_client
+from supabase import Client, create_async_client
 from pathlib import Path # Nueva importación
+from typing import Optional
 
 
 # --- Configuración Inicial ---
@@ -28,24 +29,16 @@ try:
     openai_client = AsyncOpenAI()
 except Exception as e:
     logger.error(f"Error al inicializar el cliente de OpenAI: {e}")
-    exit(1)
+    raise Exception(f"Error al inicializar el cliente de OpenAI: {e}")
 
-# Inicialización de Supabase
-try:
-    SUPABASE_URL = os.getenv("SUPABASE_URL")
-    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# Declaración de Supabase Client (se inicializará en el evento de startup de FastAPI)
+_supabase_client_instance: Optional[Client] = None
 
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        logger.error("Error: Supabase URL o Key no configurados en .env")
-        # Considerar elevar una excepción o salir en entornos de producción.
-        exit(1)
+def set_supabase_client(client: Client):
+    global _supabase_client_instance
+    _supabase_client_instance = client
 
-    supabase_client: Client = create_async_client(SUPABASE_URL, SUPABASE_KEY)
-except ImportError:
-    logger.error(
-        "Error: La librería 'supabase' no está instalada. Por favor, ejecuta 'pip install supabase'"
-    )
-    exit(1)
-except Exception as e:
-    logger.error(f"Error al inicializar el cliente de Supabase: {e}")
-    exit(1)
+def get_supabase_client() -> Client:
+    if _supabase_client_instance is None:
+        raise RuntimeError("Supabase client has not been initialized.")
+    return _supabase_client_instance

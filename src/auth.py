@@ -3,7 +3,7 @@ import hmac
 from fastapi import Security
 from fastapi.security import APIKeyHeader
 from src.models import AuthActor
-from src.config import logger, supabase_client
+from src.config import logger, get_supabase_client
 from src.exceptions import InvalidAPIKeyError, DatabaseError
 
 api_key_header_scheme = APIKeyHeader(name="Authorization", auto_error=False)
@@ -28,7 +28,7 @@ async def verify_api_key(
     try:
         # 1. Buscar claves candidatas usando el prefijo
         response = await (
-            supabase_client.from_("api_keys")
+            get_supabase_client().from_("api_keys")
             .select("id_key, key_hash, id_user")
             .eq("pre", prefix)
             .execute()
