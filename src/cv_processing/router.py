@@ -21,7 +21,7 @@ async def verify_endpoint_access(endpoint_id: UUID, actor: AuthActor = Depends(v
     try:
         response = await (
             supabase_client.from_("endpoints")
-            .select("id_user, info")
+            .select("id_user, info, secret_webhook")
             .eq("id", str(endpoint_id))
             .single()
             .execute()

@@ -22,7 +22,7 @@ async def _get_request_details(id_request: UUID) -> dict:
     try:
         response = await (
             supabase_client.from_("requests")
-            .select("*, endpoints(info)")
+            .select("*, endpoints(info, secret_webhook)")
             .eq("id_request", str(id_request))
             .single()
             .execute()
@@ -95,10 +95,22 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
     try:
         request_data = await _get_request_details(id_request)
         user_id = request_data.get("id_user")
-        endpoint_info = request_data.get("endpoints", {}).get("info", {})
         
-        if isinstance(endpoint_info, str):
-            endpoint_info = json.loads(endpoint_info)
+        endpoint_data_from_db = request_data.get("endpoints", {})
+        endpoint_info_json = endpoint_data_from_db.get("info", {})
+        secret_webhook_url = endpoint_data_from_db.get("secret_webhook")
+
+        endpoint_info = {}
+        if isinstance(endpoint_info_json, str):
+            try:
+                endpoint_info = json.loads(endpoint_info_json)
+            except json.JSONDecodeError:
+                logger.error(f"Error decodificando info JSON para petición {id_request}: {endpoint_info_json}")
+                # Decide how to handle invalid JSON strings, for now, treat as empty dict
+                endpoint_info = {}
+        elif isinstance(endpoint_info_json, dict):
+            endpoint_info = endpoint_info_json
+        
         
         # 1. Procesar el CV
         output_schema = endpoint_info.get("schema")
@@ -119,22 +131,28 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
 
         status = "completed"
         payload_out = {"status": status, "data": cv_info, "usage": usage_data.model_dump()}
+        if secret_webhook_url:
+            payload_out["secret_webhook_url"] = secret_webhook_url # Add secret_webhook_url to payload_out
         logger.info(f"Procesamiento para la petición {id_request} completado con éxito.")
 
     except (DatabaseError, FileProcessingError, OpenAIError, ValueError, InsufficientCreditsError) as e:
         error_message = str(e)
         payload_out = {"status": status, "error": error_message, "data": None}
+        if secret_webhook_url:
+            payload_out["secret_webhook_url"] = secret_webhook_url # Add secret_webhook_url to payload_out even on error
         logger.exception(f"Fallo en el procesamiento para la petición {id_request}: {e}")
     except Exception as e:
         error_message = str(e)
         payload_out = {"status": status, "error": error_message, "data": None}
+        if secret_webhook_url:
+            payload_out["secret_webhook_url"] = secret_webhook_url # Add secret_webhook_url to payload_out even on unexpected error
         logger.critical(f"Error inesperado y no controlado en la petición {id_request}: {e}", exc_info=True)
 
     finally:
         # 4. Actualizar estado y registrar log
         try:
             credit_use = usage_data.total_tokens if usage_data and status == "completed" else 0
-            await supabase_client.from_("requests").update({"status": status, "tokens_used": credit_use}).eq("id_request", str(id_request)).execute()
+            await supabase_client.from_("requests").update({"status": status}).eq("id_request", str(id_request)).execute()
             
             log_entry = {
                 "id_request": str(id_request),
@@ -147,8 +165,9 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
             logger.exception(f"Error crítico al actualizar el estado o registrar el log para la petición {id_request}: {e}")
 
         # 5. Enviar notificación al callback
-        if callback_url := endpoint_info.get("callbackURL"):
-            await _send_callback(callback_url, payload_out, id_request)
+        callback_destination_url = secret_webhook_url or endpoint_info.get("callbackURL") # Use secret_webhook_url if available
+        if callback_destination_url:
+            await _send_callback(callback_destination_url, payload_out, id_request)
         
         # 6. Limpiar archivo temporal
         if file_path.exists():
