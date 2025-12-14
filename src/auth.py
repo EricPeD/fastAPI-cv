@@ -27,7 +27,7 @@ async def verify_api_key(
 
     try:
         # 1. Buscar claves candidatas usando el prefijo
-        response = (
+        response = await (
             supabase_client.from_("api_keys")
             .select("id_key, key_hash, id_user")
             .eq("pre", prefix)

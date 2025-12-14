@@ -19,7 +19,7 @@ async def verify_endpoint_access(endpoint_id: UUID, actor: AuthActor = Depends(v
     Returns the endpoint data if successful.
     """
     try:
-        response = (
+        response = await (
             supabase_client.from_("endpoints")
             .select("id_user, info")
             .eq("id", str(endpoint_id))
@@ -59,7 +59,7 @@ async def upload_cv(
             "endpoint_id": str(endpoint_id),
             "status": "processing",
         }
-        request_response = supabase_client.from_("requests").insert(request_payload).execute()
+        request_response = await supabase_client.from_("requests").insert(request_payload).execute()
         id_request = request_response.data[0]["id_request"]
 
         # 2. Guardar el archivo en disco de forma segura
