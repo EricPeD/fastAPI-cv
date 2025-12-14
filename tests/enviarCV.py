@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 # --- Configuración ---
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://51.77.150.113:8000"
 ENDPOINT_ID = (
     "d3049ccd-ede3-40b0-a475-d8f620e4b495"  # Reemplaza con tu ID de endpoint real
 )
@@ -41,7 +41,7 @@ FILES_TO_SEND = [
 async def send_file_request(
     client: httpx.AsyncClient, file_path: Path, request_num: int
 ):
-    url = f"{BASE_URL}/cv/{ENDPOINT_ID}"
+    url = f"{BASE_URL}/{ENDPOINT_ID}"
     headers = {"Authorization": f"Bearer {API_KEY}"}
 
     try:

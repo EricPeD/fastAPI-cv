@@ -42,6 +42,7 @@ async def verify_endpoint_access(endpoint_id: UUID, actor: AuthActor = Depends(v
 
 @router.post("/{endpoint_id}", status_code=202, summary="Subir archivo para procesar")
 async def upload_cv(
+    endpoint_id: UUID,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     endpoint_data: dict = Depends(verify_endpoint_access),
