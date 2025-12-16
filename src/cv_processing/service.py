@@ -156,22 +156,35 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         # 4. Actualizar estado y registrar log
         try:
             credit_use = usage_data.total_tokens if usage_data and status == "completed" else 0
-            await supabase_client.from_("requests").update({"status": status}).eq("id_request", str(id_request)).execute()
-            
+            supabase = get_supabase_client()
+            await supabase.from_("requests").update({"status": status}).eq("id_request", str(id_request)).execute()
+
+            # Log usage info for debugging instead of saving to DB
+            if usage_data:
+                logger.info(f"Token usage for request {id_request}: {usage_data.model_dump_json()}")
+
             log_entry = {
                 "id_request": str(id_request),
                 "payload_out": payload_out,
                 "error": error_message,
                 "credit_use": credit_use,
             }
-            await supabase_client.from_("request_logs").insert(log_entry).execute()
+            await supabase.from_("request_logs").insert(log_entry).execute()
         except Exception as e:
             logger.exception(f"Error crítico al actualizar el estado o registrar el log para la petición {id_request}: {e}")
 
         # 5. Enviar notificación al callback
-        callback_destination_url = secret_webhook or endpoint_info.get("callbackURL") # Use secret_webhook if available
+        callback_destination_url = endpoint_info.get("callbackURL")
         if callback_destination_url:
-            await _send_callback(callback_destination_url, payload_out, id_request, endpoint_id, secret_webhook)
+            if isinstance(callback_destination_url, str) and (callback_destination_url.startswith("http://") or callback_destination_url.startswith("https://")):
+                await _send_callback(callback_destination_url, payload_out, id_request, endpoint_id, secret_webhook)
+            else:
+                logger.error(
+                    f"La URL del callback '{callback_destination_url}' para la petición {id_request} es inválida. "
+                    "Debe ser una cadena de texto que empiece con 'http://' o 'https://'. No se enviará el callback."
+                )
+        else:
+            logger.info(f"No hay URL de callback configurada para la petición {id_request}. No se enviará nada.")
         
         # 6. Limpiar archivo temporal
         if file_path.exists():
@@ -186,14 +199,15 @@ async def _send_callback(url: str, payload: dict, request_id: UUID, endpoint_id:
         signature = hmac.new(secret_webhook.encode('utf-8'), payload_bytes, hashlib.sha256).hexdigest()
         headers["X-Hub-Signature-256"] = f"sha256={signature}"
 
+    supabase = get_supabase_client()
+
     for i in range(3):
         webhook_log_id = uuid4() # Generate UUID for each webhook log attempt
 
         # Log initial attempt
         try:
-            await supabase_client.from_("webhooks").insert({
+            await supabase.from_("webhooks").insert({
                 "id_webhook": str(webhook_log_id),
-                "request_id": str(request_id),
                 "endpoint_id": str(endpoint_id),
                 "status": "attempted",
                 "retry_count": i,
@@ -223,7 +237,7 @@ async def _send_callback(url: str, payload: dict, request_id: UUID, endpoint_id:
         finally:
             # Update webhook log record
             try:
-                await supabase_client.from_("webhooks").update({
+                await supabase.from_("webhooks").update({
                     "status": status,
                     "http_status": http_status,
                     "error": error_msg,
@@ -232,4 +246,4 @@ async def _send_callback(url: str, payload: dict, request_id: UUID, endpoint_id:
             except Exception as e:
                 logger.error(f"Error al actualizar log de webhook para {request_id}: {e}")
 
-    logger.error(f"Fallo final al enviar callback para {id_request} tras 3 intentos.")
+    logger.error(f"Fallo final al enviar callback para {request_id} tras 3 intentos.")

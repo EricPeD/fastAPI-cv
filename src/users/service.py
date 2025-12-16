@@ -17,21 +17,45 @@ async def get_user_credits(user_id: str) -> int | None:
 
 async def deduct_credits_atomic(user_id: str, amount: int) -> bool:
     """
-    Deducts credits from a user's account atomically using an RPC call.
-    Assumes a `deduct_user_credits` function exists in the database.
+    Deducts credits from a user's account via application-layer logic.
+    WARNING: This operation is NOT truly atomic and may be subject to race conditions
+    under high concurrency from the same user.
     """
+    logger.warning(f"Executing non-atomic credit deduction for user {user_id}. A race condition is possible.")
+    
+    supabase = get_supabase_client()
     try:
-        # Assumes a DB function: `deduct_user_credits(p_user_id TEXT, p_amount INT)`
-        # that returns `true` on success and `false` on failure (e.g., insufficient funds).
-        response = await get_supabase_client().rpc(
-            'deduct_user_credits',
-            {'p_user_id': user_id, 'p_amount': amount}
-        ).execute()
+        # 1. Fetch current credits
+        user_response = await supabase.from_("users").select("credits").eq("id_user", user_id).single().execute()
         
-        if response.data:
+        if not user_response.data:
+            logger.error(f"Deduction failed: User '{user_id}' not found.")
+            return False
+            
+        current_credits = user_response.data.get("credits", 0)
+
+        # 2. Check for sufficient credits
+        if current_credits < amount:
+            logger.warning(f"User {user_id} has insufficient credits ({current_credits}) to deduct {amount}.")
+            raise InsufficientCreditsError(required=amount)
+
+        # 3. Perform deduction and update
+        new_credits = current_credits - amount
+        update_response = await supabase.from_("users").update({"credits": new_credits}).eq("id_user", user_id).execute()
+
+        # Post-update check could be added here if needed, but we'll trust the response for now
+        if update_response.data:
+            logger.info(f"Successfully deducted {amount} credits from user {user_id}. New balance: {new_credits}")
             return True
+        
+        logger.error(f"Failed to update credits for user {user_id} after deduction check. Response: {update_response.data}")
         return False
+
+    except InsufficientCreditsError:
+        # Re-raise the specific error to be caught by the calling service
+        raise
     except Exception as e:
-        logger.error(f"Error atómico al deducir créditos para {user_id}: {e}")
+        logger.error(f"Error during credit deduction for user {user_id}: {e}")
+        # Raising a general DatabaseError for other unexpected issues
         raise DatabaseError("Error al procesar el débito de créditos.")
 

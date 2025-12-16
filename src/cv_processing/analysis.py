@@ -55,22 +55,37 @@ async def extract_info_with_openai_vision(file_path: Path, output_schema: dict) 
     
     schema_string = json.dumps(output_schema, indent=2, ensure_ascii=False)
     system_prompt = f"""
-    Eres un agente de IA autónomo especializado en el análisis de documentos. Tu objetivo es procesar el siguiente documento y extraer la información solicitada en un formato JSON estricto.
-    ESQUEMA DE SALIDA REQUERIDO (DEBES SEGUIRLO ESTRICTAMENTE):
-    {schema_string}
     REGLAS ADICIONALES:
     - Tu respuesta debe ser ÚNICAMENTE el objeto JSON puro y válido. No incluyas texto introductorio, comentarios, ni bloques de código.
+    - NO INCLUYAS las claves 'schema' o 'callbackURL' en el objeto JSON de tu respuesta.
+    - Si el documento está en blanco, no contiene información relevante o no puedes extraer ningún dato, DEBES devolver un objeto JSON que se ajuste al esquema pero con todos sus campos establecidos en `null` o listas vacías `[]` según corresponda. NO devuelvas una cadena vacía.
     """
     
     try:
+        # ---- START DEBUG LOGGING ----
+        logger.info("--- INICIO DEBUG: OpenAI Vision Request ---")
+        logger.info(f"Modelo: gpt-5-nano")
+        logger.info(f"System Prompt: {system_prompt}")
+        logger.info(f"Número de imágenes enviadas: {len(messages_content) - 1}")
+        # ---- FIN DEBUG LOGGING ----
+
         response = await openai_client.chat.completions.create(
             model="gpt-5-nano",
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": messages_content}],
             response_format={"type": "json_object"},
-            max_completion_tokens=2048,
+            max_completion_tokens=20000,
         )
+
+        # ---- START DEBUG LOGGING ----
+        logger.info("--- INICIO DEBUG: OpenAI Vision Response ---")
+        logger.info(response.model_dump_json(indent=2))
+        logger.info("--- FIN DEBUG: OpenAI Vision Response ---")
+        # ---- FIN DEBUG LOGGING ----
+        
         json_text = response.choices[0].message.content.strip()
-        usage = Usage.model_validate(response.usage)
+        if not json_text:
+            raise OpenAIError("La API de OpenAI devolvió una respuesta vacía.")
+        usage = Usage.model_validate(response.usage.model_dump())
         return json.loads(json_text), usage
     except Exception as e:
         logger.exception(f"Error al procesar el CV con OpenAI Vision: {e}")
@@ -86,18 +101,37 @@ async def extract_info_from_text_with_openai(text: str, output_schema: dict) -> 
     ESQUEMA DE SALIDA REQUERIDO (DEBES SEGUIRLO ESTRICTAMENTE):
     {schema_string}
     REGLAS ADICIONALES:
-    - Tu respuesta debe ser ÚNICAMENTE el objeto JSON puro y válido.
+    - Tu respuesta debe ser ÚNICAMENTE el objeto JSON puro y válido. No incluyas texto introductorio, comentarios, ni bloques de código.
+    - NO INCLUYAS las claves 'schema' o 'callbackURL' en el objeto JSON de tu respuesta.
+    - Si el documento está en blanco, no contiene información relevante o no puedes extraer ningún dato, DEBES devolver un objeto JSON que se ajuste al esquema pero con todos sus campos establecidos en `null` o listas vacías `[]` según corresponda. NO devuelvas una cadena vacía.
     """
     user_prompt = f"Analiza el siguiente texto y extrae la información en el formato JSON especificado:\n---\n{text}"
 
     try:
+        # ---- START DEBUG LOGGING ----
+        logger.info("--- INICIO DEBUG: OpenAI Text Request ---")
+        logger.info(f"Modelo: gpt-5-nano")
+        logger.info(f"System Prompt: {system_prompt}")
+        logger.info(f"Longitud del User Prompt: {len(user_prompt)}")
+        # ---- FIN DEBUG LOGGING ----
+
         response = await openai_client.chat.completions.create(
             model="gpt-5-nano",
             response_format={"type": "json_object"},
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
         )
-        usage = Usage.model_validate(response.usage)
-        return json.loads(response.choices[0].message.content), usage
+
+        # ---- START DEBUG LOGGING ----
+        logger.info("--- INICIO DEBUG: OpenAI Text Response ---")
+        logger.info(response.model_dump_json(indent=2))
+        logger.info("--- FIN DEBUG: OpenAI Text Response ---")
+        # ---- FIN DEBUG LOGGING ----
+        
+        json_text = response.choices[0].message.content.strip()
+        if not json_text:
+            raise OpenAIError("La API de OpenAI (texto) devolvió una respuesta vacía.")
+        usage = Usage.model_validate(response.usage.model_dump())
+        return json.loads(json_text), usage
     except Exception as e:
         logger.exception(f"Error en la API de OpenAI (texto): {e}")
         raise OpenAIError("Error en la llamada a la API de OpenAI (texto).")

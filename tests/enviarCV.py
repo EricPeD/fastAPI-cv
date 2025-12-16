@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 # --- Configuración ---
-BASE_URL = "http://51.77.150.113:8000"
+BASE_URL = "http://localhost:8000"
 ENDPOINT_ID = (
     "697888ca-9aa1-4c2c-8bd4-423769769f70"  # Reemplaza con tu ID de endpoint real
 )
