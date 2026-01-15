@@ -99,7 +99,7 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         request_data = await _get_request_details(id_request)
         user_id = request_data.get("id_user")
         endpoint_id = request_data.get("endpoint_id") 
-        
+ ## Nuevo metadata
         endpoint_data_from_db = request_data.get("endpoints", {})
         endpoint_info_json = endpoint_data_from_db.get("info", {})
         secret_webhook = endpoint_data_from_db.get("secret_webhook") # Renamed for clarity
@@ -177,7 +177,7 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         callback_destination_url = endpoint_info.get("callbackURL")
         if callback_destination_url:
             if isinstance(callback_destination_url, str) and (callback_destination_url.startswith("http://") or callback_destination_url.startswith("https://")):
-                await _send_callback(callback_destination_url, payload_out, id_request, endpoint_id, secret_webhook)
+                await _send_callback(callback_destination_url, payload_out, id_request,  endpoint_id, secret_webhook)
             else:
                 logger.error(
                     f"La URL del callback '{callback_destination_url}' para la petición {id_request} es inválida. "
@@ -190,11 +190,24 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         if file_path.exists():
             os.remove(file_path)
 
-async def _send_callback(url: str, payload: dict, request_id: UUID, endpoint_id: UUID, secret_webhook: str | None = None):
-    """Envia el resultado a la URL de callback con reintentos y registra los intentos."""
+async def _send_callback(
+    url: str,
+    payload: dict,
+    request_id: UUID,
+    metadata: dict,
+    endpoint_id: UUID,
+    secret_webhook: str | None = None
+) -> dict:
+    """
+    Envía el resultado a la URL de callback con reintentos y registra los intentos.
+    Devuelve un dict con:
+        - status: 'success' o 'failed'
+        - http_status: código HTTP si se recibió respuesta
+        - error: mensaje de error si falla
+        - metadata: los metadatos originales
+    """
     headers = {"Content-Type": "application/json"}
     if secret_webhook:
-        # Calculate HMAC signature
         payload_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
         signature = hmac.new(secret_webhook.encode('utf-8'), payload_bytes, hashlib.sha256).hexdigest()
         headers["X-Hub-Signature-256"] = f"sha256={signature}"
@@ -202,16 +215,15 @@ async def _send_callback(url: str, payload: dict, request_id: UUID, endpoint_id:
     supabase = get_supabase_client()
 
     for i in range(3):
-        webhook_log_id = uuid4() # Generate UUID for each webhook log attempt
-
-        # Log initial attempt
+        webhook_log_id = uuid4()  # UUID para este intento
+        # Log inicial del intento
         try:
             await supabase.from_("webhooks").insert({
                 "id_webhook": str(webhook_log_id),
                 "endpoint_id": str(endpoint_id),
                 "status": "attempted",
                 "retry_count": i,
-                "received_at": datetime.now().isoformat(), # Use current time
+                "received_at": datetime.now().isoformat(),
             }).execute()
         except Exception as e:
             logger.error(f"Error al registrar intento de webhook inicial para {request_id}: {e}")
@@ -222,20 +234,24 @@ async def _send_callback(url: str, payload: dict, request_id: UUID, endpoint_id:
 
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.post(url, json=payload, headers=headers, timeout=30.0) # Added headers
+                response = await client.post(url, json=payload, headers=headers, timeout=30.0)
                 response.raise_for_status()
                 status = "success"
                 http_status = response.status_code
                 logger.info(f"Resultado enviado al callback {url} para la petición {request_id} (intento {i+1}).")
-                return # Exit on success
+                return {
+                    "status": status,
+                    "http_status": http_status,
+                    "error": None,
+                    "metadata": metadata
+                }
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             http_status = e.response.status_code if hasattr(e, 'response') and e.response else None
             error_msg = str(e)
             logger.warning(f"Fallo al enviar callback para {request_id} (intento {i+1}/3): {e}")
             if i < 2:
-                await asyncio.sleep(2.0 * (i + 1)) # Backoff lineal
+                await asyncio.sleep(2.0 * (i + 1))  # backoff lineal
         finally:
-            # Update webhook log record
             try:
                 await supabase.from_("webhooks").update({
                     "status": status,
@@ -247,3 +263,9 @@ async def _send_callback(url: str, payload: dict, request_id: UUID, endpoint_id:
                 logger.error(f"Error al actualizar log de webhook para {request_id}: {e}")
 
     logger.error(f"Fallo final al enviar callback para {request_id} tras 3 intentos.")
+    return {
+        "status": "failed",
+        "http_status": http_status,
+        "error": error_msg,
+        "metadata": metadata
+    }

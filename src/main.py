@@ -56,6 +56,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.exception_handler(Exception)
+async def all_exception_handler(request: Request, exc: Exception):
+    logger.exception(f"Ocurrió un error en {request.url}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Ocurrió un error interno."}
+    )
 # Incluir routers
 app.include_router(cv_processing_router)
 app.include_router(users_router, prefix="/users")
