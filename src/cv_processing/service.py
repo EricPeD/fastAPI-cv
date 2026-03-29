@@ -6,7 +6,7 @@ import httpx
 from pathlib import Path
 from uuid import UUID, uuid4
 from typing import Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import hmac
 import hashlib
 
@@ -92,8 +92,10 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
     status = "failed"
     error_message = None
     user_id = None
+    endpoint_id = None
     endpoint_info = {}
     usage_data: Usage | None = None
+    secret_webhook = None
 
     try:
         request_data = await _get_request_details(id_request)
@@ -102,19 +104,18 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         
         endpoint_data_from_db = request_data.get("endpoints", {})
         endpoint_info_json = endpoint_data_from_db.get("info", {})
-        secret_webhook = endpoint_data_from_db.get("secret_webhook") # Renamed for clarity
+        secret_webhook = endpoint_data_from_db.get("secret_webhook")
 
+        # ... (decodificación de endpoint_info_json)
         endpoint_info = {}
         if isinstance(endpoint_info_json, str):
             try:
                 endpoint_info = json.loads(endpoint_info_json)
             except json.JSONDecodeError:
                 logger.error(f"Error decodificando info JSON para petición {id_request}: {endpoint_info_json}")
-                # Decide how to handle invalid JSON strings, for now, treat as empty dict
                 endpoint_info = {}
         elif isinstance(endpoint_info_json, dict):
             endpoint_info = endpoint_info_json
-        
         
         # 1. Procesar el CV
         output_schema = endpoint_info.get("schema")
@@ -124,33 +125,83 @@ async def process_cv_and_callback(id_request: UUID, file_path: Path):
         mode = endpoint_info.get("analysis_mode", "vision_first")
         cv_info, usage_data = await _run_analysis(mode, file_path, output_schema)
         
-        # 2. Deducir créditos (operación atómica)
+        # 2. Deducir créditos
         if user_id:
             cost = usage_data.total_tokens
             success = await deduct_credits_atomic(user_id, cost)
             if not success:
-                # This can happen if the user runs out of credits between the initial check and now.
-                logger.warning(f"No se pudieron deducir {cost} créditos al usuario {user_id} para la petición {id_request} (créditos insuficientes).")
+                logger.warning(f"No se pudieron deducir {cost} créditos al usuario {user_id} para la petición {id_request}.")
                 raise InsufficientCreditsError(required=cost)
 
         status = "completed"
-        payload_out = {"status": status, "data": cv_info, "usage": usage_data.model_dump()}
+        
+        # Construir metadatos de éxito
+        # actualizar para que sea el usuario quien introduzca los metadatos que necesita
+        metadata = {
+            "request_id": str(id_request),
+            "user_id": user_id, 
+            "endpoint_id": str(endpoint_id),
+            "event_type": "cv.analysis.completed",
+            "processed_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        payload_out = {
+            "status": status, 
+            "data": cv_info, 
+            "usage": usage_data.model_dump(),
+            "metadata": metadata
+        }
+        
         if secret_webhook:
-            payload_out["secret_webhook"] = secret_webhook # Add secret_webhook to payload_out
+            payload_out["secret_webhook"] = secret_webhook
+        
         logger.info(f"Procesamiento para la petición {id_request} completado con éxito.")
 
     except (DatabaseError, FileProcessingError, OpenAIError, ValueError, InsufficientCreditsError) as e:
         error_message = str(e)
-        payload_out = {"status": status, "error": error_message, "data": None}
+        
+        metadata = {
+            "request_id": str(id_request),
+            "user_id": user_id,
+            "endpoint_id": str(endpoint_id),
+            "event_type": "cv.analysis.failed",
+            "processed_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        payload_out = {
+            "status": status, 
+            "error": error_message, 
+            "data": None,
+            "metadata": metadata
+        }
+        
         if secret_webhook:
-            payload_out["secret_webhook"] = secret_webhook # Add secret_webhook to payload_out even on error
+            payload_out["secret_webhook"] = secret_webhook
+            
         logger.exception(f"Fallo en el procesamiento para la petición {id_request}: {e}")
+
     except Exception as e:
         error_message = str(e)
-        payload_out = {"status": status, "error": error_message, "data": None}
+        
+        metadata = {
+            "request_id": str(id_request),
+            "user_id": user_id,
+            "endpoint_id": str(endpoint_id),
+            "event_type": "cv.analysis.failed",
+            "processed_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        payload_out = {
+            "status": status, 
+            "error": error_message, 
+            "data": None,
+            "metadata": metadata
+        }
+        
         if secret_webhook:
-            payload_out["secret_webhook"] = secret_webhook # Add secret_webhook to payload_out even on unexpected error
-        logger.critical(f"Error inesperado y no controlado en la petición {id_request}: {e}", exc_info=True)
+            payload_out["secret_webhook"] = secret_webhook
+            
+        logger.critical(f"Error inesperado en la petición {id_request}: {e}", exc_info=True)
 
     finally:
         # 4. Actualizar estado y registrar log

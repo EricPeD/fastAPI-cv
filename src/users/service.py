@@ -34,26 +34,24 @@ async def deduct_credits_atomic(user_id: str, amount: int) -> bool:
             
         current_credits = user_response.data.get("credits", 0)
 
-        # 2. Check for sufficient credits
-        if current_credits < amount:
-            logger.warning(f"User {user_id} has insufficient credits ({current_credits}) to deduct {amount}.")
-            raise InsufficientCreditsError(required=amount)
+        # 2. Calculate new balance
+        new_credits = max(0, current_credits - amount)
+        
+        if new_credits == 0 and current_credits < amount:
+            logger.warning(f"User {user_id} has insufficient credits ({current_credits}) for a {amount} credit charge. Balance set to 0.")
 
         # 3. Perform deduction and update
-        new_credits = current_credits - amount
         update_response = await supabase.from_("users").update({"credits": new_credits}).eq("id_user", user_id).execute()
 
         # Post-update check could be added here if needed, but we'll trust the response for now
         if update_response.data:
-            logger.info(f"Successfully deducted {amount} credits from user {user_id}. New balance: {new_credits}")
+            deducted_amount = current_credits - new_credits
+            logger.info(f"Successfully deducted {deducted_amount} credits from user {user_id}. New balance: {new_credits}")
             return True
         
         logger.error(f"Failed to update credits for user {user_id} after deduction check. Response: {update_response.data}")
         return False
 
-    except InsufficientCreditsError:
-        # Re-raise the specific error to be caught by the calling service
-        raise
     except Exception as e:
         logger.error(f"Error during credit deduction for user {user_id}: {e}")
         # Raising a general DatabaseError for other unexpected issues

@@ -109,10 +109,10 @@ async def extract_info_from_text_with_openai(text: str, output_schema: dict) -> 
 
     try:
         # ---- START DEBUG LOGGING ----
-        logger.info("--- INICIO DEBUG: OpenAI Text Request ---")
-        logger.info(f"Modelo: gpt-5-nano")
-        logger.info(f"System Prompt: {system_prompt}")
-        logger.info(f"Longitud del User Prompt: {len(user_prompt)}")
+        # logger.info("--- INICIO DEBUG: OpenAI Text Request ---")
+        # logger.info(f"Modelo: gpt-5-nano")
+        # logger.info(f"System Prompt: {system_prompt}")
+        # logger.info(f"Longitud del User Prompt: {len(user_prompt)}")
         # ---- FIN DEBUG LOGGING ----
 
         response = await openai_client.chat.completions.create(
@@ -121,11 +121,11 @@ async def extract_info_from_text_with_openai(text: str, output_schema: dict) -> 
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
         )
 
-        # ---- START DEBUG LOGGING ----
-        logger.info("--- INICIO DEBUG: OpenAI Text Response ---")
-        logger.info(response.model_dump_json(indent=2))
-        logger.info("--- FIN DEBUG: OpenAI Text Response ---")
-        # ---- FIN DEBUG LOGGING ----
+        # # ---- START DEBUG LOGGING ----
+        # logger.info("--- INICIO DEBUG: OpenAI Text Response ---")
+        # logger.info(response.model_dump_json(indent=2))
+        # logger.info("--- FIN DEBUG: OpenAI Text Response ---")
+        # # ---- FIN DEBUG LOGGING ----
         
         json_text = response.choices[0].message.content.strip()
         if not json_text:
