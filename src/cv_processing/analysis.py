@@ -143,10 +143,10 @@ async def extract_info_from_text_with_openai(text: str, output_schema: dict) -> 
     user_prompt = f"Extract all information from the following text:\n\n---\n{text}\n---"
 
     try:
-        logger.info("--- INICIO DEBUG: OpenAI Text Request ---")
-        logger.info(f"Modelo: gpt-5-nano")
-        logger.info(f"System Prompt: {system_prompt}")
-        logger.info(f"Longitud del User Prompt: {len(user_prompt)}")
+        # logger.info("--- INICIO DEBUG: OpenAI Text Request ---")
+        # logger.info(f"Modelo: gpt-5-nano")
+        # logger.info(f"System Prompt: {system_prompt}")
+        # logger.info(f"Longitud del User Prompt: {len(user_prompt)}")
 
         response = await openai_client.chat.completions.create(
             model="gpt-5-nano",

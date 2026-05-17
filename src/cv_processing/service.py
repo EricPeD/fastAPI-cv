@@ -91,6 +91,7 @@ async def process_cv_and_callback(
     error_message = None
     user_id = None
     endpoint_id = None
+    endpoint_id = None
     endpoint_info = {}
     secret_webhook = None
     usage_data: Usage | None = None
@@ -150,6 +151,7 @@ async def process_cv_and_callback(
             "secret_webhook": secret_webhook,
         }
         logger.exception(f"Fallo en el procesamiento para la petición {id_request}: {e}")
+
 
     except Exception as e:
         error_message = str(e)
